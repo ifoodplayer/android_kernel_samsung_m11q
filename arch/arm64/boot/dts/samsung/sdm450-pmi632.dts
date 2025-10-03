@@ -368,6 +368,12 @@
 			};
 
 			rpm-regulator-smpa2 {
+				qcom,gx-retention; //Enable regulator retention level for IDLE modes
+				qcom,soft-start-enable = <0x1>; //enable soft start to start without current peaks that can damage device
+				qcom,hpm-enable = <0x1>; //enable high power mode
+				qcom,boost-current-limit = <0xe>; //3200mA maximum
+				qcom,ocp-enable = <0x1>; //enables over current protection
+				qcom,init-quiet-mode = <0x2>; //Regulator EMI noise reduction
 				compatible = "qcom,rpm-smd-regulator-resource";
 				qcom,resource-name = "smpa";
 				qcom,resource-id = <0x2>;
@@ -457,6 +463,7 @@
 					status = "okay";
 					regulator-min-microvolt = <0x1cfde0>;
 					regulator-max-microvolt = <0x1f47d0>;
+					qcom,init-quiet-mode = <0x2>; //Regulator EMI noise reduction
 					qcom,init-voltage = <0x1cfde0>;
 					phandle = <0x120>;
 				};
@@ -10034,6 +10041,7 @@
 				spm-regulator@2000 {
 					compatible = "qcom,spm-regulator";
 					reg = <0x2000 0x100>;
+					qcom,init-quiet-mode = <0x2>; //Regulator EMI noise reduction
 					regulator-name = "pm8953_s5";
 					regulator-min-microvolt = <0x61a80>;
 					regulator-max-microvolt = <0x116520>;
@@ -12482,7 +12490,7 @@
 	};
 
 	chosen {
-		bootargs = "core_ctl_disable_cpumask=0-7 kpti=0";
+		bootargs = "quiet boot_cpus=0,1,2,3,4,5,6,7 core_ctl_disable_cpumask=0-7 kpti=0";
 	};
 
 	aliases {
