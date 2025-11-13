@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -1729,7 +1728,9 @@ eHalStatus sme_Open(tHalHandle hHal)
 
       sme_p2pOpen(pMac);
       smeTraceInit(pMac);
+#ifdef SME_TRACE_RECORD
       sme_register_debug_callback();
+#endif
 
    }while (0);
 
@@ -7180,6 +7181,7 @@ VOS_STATUS sme_DbgWriteMemory(tHalHandle hHal, v_U32_t memAddr, v_U8_t *pBuf, v_
 }
 
 
+#ifdef WLAN_DEBUG
 void pmcLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString, ...)
 {
     VOS_TRACE_LEVEL  vosDebugLevel;
@@ -7200,7 +7202,6 @@ void pmcLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString, ...)
 
 void smsLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString,...)
 {
-#ifdef WLAN_DEBUG
     // Verify against current log level
     if ( loglevel > pMac->utils.gLogDbgLevel[LOG_INDEX_FOR_MODULE( SIR_SMS_MODULE_ID )] )
         return;
@@ -7214,8 +7215,8 @@ void smsLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString,...)
 
         va_end( marker );              /* Reset variable arguments.      */
     }
-#endif
 }
+#endif
 
 /* ---------------------------------------------------------------------------
     \fn sme_GetWcnssWlanCompiledVersion
@@ -9012,9 +9013,8 @@ eHalStatus sme_PreferredNetworkFoundInd (tHalHandle hHal, void* pMsg)
                               pPrefNetworkFoundInd->ssId.length);
          vos_mem_copy(dumpSsId, pPrefNetworkFoundInd->ssId.ssId, ssIdLength);
          dumpSsId[ssIdLength] = 0;
-         smsLog(pMac, LOG1, FL(" SSID=%s frame length %d Freq %d"),
-                dumpSsId, pPrefNetworkFoundInd->frameLength,
-                pPrefNetworkFoundInd->freq);
+         smsLog(pMac, LOG1, FL(" SSID=%s frame length %d"),
+             dumpSsId, pPrefNetworkFoundInd->frameLength);
 
          /* Flush scan results, So as to avoid indication/updation of
           * stale entries, which may not have aged out during APPS collapse
@@ -15681,13 +15681,18 @@ eHalStatus sme_update_olpc_mode(tHalHandle hHal, bool enable)
 #ifdef FEATURE_WLAN_SW_PTA
 eHalStatus sme_sw_pta_req(tHalHandle hal,
 			  void (*resp_callback)(uint8_t resp_status),
-			  uint8_t session_id, bool bt_enabled, bool bt_adv,
-			  bool ble_enabled, bool bt_a2dp, bool bt_sco)
+			  uint8_t session_id, enum sir_sw_pta_param_type type,
+			  uint8_t length, uint8_t *value)
 {
 	tpAniSirGlobal mac = PMAC_STRUCT(hal);
 	struct sir_sw_pta_req *sw_pta_req;
 	eHalStatus status;
 	tSmeCmd *sme_cmd;
+
+	if (length > SW_PTA_COEX_PARAMS_MAX_LEN) {
+		smsLog(mac, LOGE, FL("Invalid length"));
+		return eHAL_STATUS_FAILURE;
+	}
 
 	sme_cmd = csrGetCommandBuffer(mac);
 	if (!sme_cmd) {
@@ -15702,11 +15707,9 @@ eHalStatus sme_sw_pta_req(tHalHandle hal,
 		return eHAL_STATUS_RESOURCES;
 	}
 
-	sw_pta_req->bt_enabled = bt_enabled;
-	sw_pta_req->bt_adv = bt_adv;
-	sw_pta_req->ble_enabled = ble_enabled;
-	sw_pta_req->bt_a2dp = bt_a2dp;
-	sw_pta_req->bt_sco = bt_sco;
+	sw_pta_req->param_type = type;
+	sw_pta_req->length = length;
+	memcpy(sw_pta_req->value, value, length);
 
 	status = sme_AcquireGlobalLock(&mac->sme);
 	if (HAL_STATUS_SUCCESS(status)) {
@@ -15735,5 +15738,21 @@ eHalStatus sme_sw_pta_req(tHalHandle hal,
 
 	sme_ReleaseGlobalLock(&mac->sme);
 	return eHAL_STATUS_SUCCESS;
+}
+
+eHalStatus sme_sco_req(tHalHandle hal,
+		       void (*resp_callback)(uint8_t resp_status),
+		       uint8_t session_id, uint8_t req_status)
+{
+	return sme_sw_pta_req(hal, resp_callback, session_id,
+			      SCO_STATUS, sizeof(req_status), &req_status);
+}
+
+eHalStatus sme_bt_req(tHalHandle hal,
+		      void (*resp_callback)(uint8_t resp_status),
+		      uint8_t session_id, uint8_t req_status)
+{
+	return sme_sw_pta_req(hal, resp_callback, session_id,
+			      BT_STATUS, sizeof(req_status), &req_status);
 }
 #endif /* FEATURE_WLAN_SW_PTA */

@@ -861,11 +861,6 @@ sapSignalHDDevent
             event->HTCaps = pCsrRoamInfo->ht_caps;
             event->VHTCaps = pCsrRoamInfo->vht_caps;
 
-            if (pCsrRoamInfo->fReassocReq) {
-                event->iesLen -= VOS_MAC_ADDR_SIZE;
-                event->ies += VOS_MAC_ADDR_SIZE;
-            }
-
             //TODO: Need to fill sapAuthType
             //event->SapAuthType = pCsrRoamInfo->pProfile->negotiatedAuthType;
             break;
@@ -1533,8 +1528,6 @@ sapconvertToCsrProfile(tsap_Config_t *pconfig_params, eCsrRoamBssType bssType, t
     profile->MFPCapable = pconfig_params->mfpCapable ? 1 : 0;
     profile->MFPRequired = pconfig_params->mfpRequired ? 1 : 0;
 #endif
-
-    profile->require_h2e = pconfig_params->require_h2e;
 
     return eSAP_STATUS_SUCCESS; /* Success.  */
 }
