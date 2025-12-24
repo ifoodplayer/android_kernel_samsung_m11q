@@ -215,6 +215,4 @@ source "drivers/tee/Kconfig"
 source "drivers/samsung/Kconfig"
 
 source "drivers/afc/Kconfig"
-
-source "drivers/kernelsu/Kconfig"
 endmenu
