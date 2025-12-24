@@ -308,10 +308,14 @@ int qg_write_monotonic_soc(struct qpnp_qg *chip, int msoc)
 
 	return rc;
 }
-
+/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
+#define WORK_AROUND_TEMP_DELAY 100
+#define WORK_AROUND_DETECT_TIMES 3
+/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
 int qg_get_battery_temp(struct qpnp_qg *chip, int *temp)
 {
 	int rc = 0;
+	int re_detect_cycle;
 	struct qpnp_vadc_result result;
 
 	if (chip->battery_missing) {
@@ -319,12 +323,35 @@ int qg_get_battery_temp(struct qpnp_qg *chip, int *temp)
 		return 0;
 	}
 
-	rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU2, &result);
+       /* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 start */
+	//rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU2, &result);
+	rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU1, &result);
+
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
 	if (rc) {
-		pr_err("Failed reading adc channel=%d, rc=%d\n",
-					VADC_BAT_THERM_PU2, rc);
-		return rc;
+		pr_err("[%s]Failed to read batt_temp rc=%d; Re-detect batt_temp after 100ms.\n",__func__, rc);
+		mdelay(WORK_AROUND_TEMP_DELAY);
+		re_detect_cycle = 0;
+
+		while ((re_detect_cycle < WORK_AROUND_DETECT_TIMES) && (rc < 0)) {
+			rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_THERM_PU1, &result);
+			pr_err("[%s]Re-detected real rc = %d",__func__,rc);
+
+			if (rc) {
+				pr_err("[%s]Failed to read batt_temp again. times = %d,  rc=%d;Re-detect batt_temp after 100ms.\n",__func__,re_detect_cycle, rc);
+				mdelay(WORK_AROUND_TEMP_DELAY);
+			}
+			re_detect_cycle++;
+		}
+		if (rc) {
+			pr_err("FINALLY, failed reading adc channel=%d, rc=%d\n",
+						//VADC_BAT_THERM_PU2, rc);
+						VADC_BAT_THERM_PU1, rc);
+			return rc;
+		}
 	}
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
+       /* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 end */
 	pr_debug("batt_temp = %lld meas = 0x%llx\n",
 			result.physical, result.measurement);
 
@@ -394,3 +421,34 @@ int qg_get_battery_voltage(struct qpnp_qg *chip, int *vbat_uv)
 
 	return rc;
 }
+
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+int get_val(struct range_data *range, int threshold, int *val)
+{
+	int i;
+
+	/*
+	 * If the threshold is lesser than the minimum allowed range,
+	 * return -ENODATA.
+	 */
+	if (threshold < range[0].low_threshold)
+		return -ENODATA;
+
+	/* First try to find the matching index without hysteresis */
+	for (i = 0; i < MAX_VFLOAT_ENTRIES; i++) {
+		if (!range[i].high_threshold && !range[i].low_threshold) {
+			/* First invalid table entry; exit loop */
+			break;
+		}
+
+		if (is_between(range[i].low_threshold,
+			range[i].high_threshold, threshold)) {
+			*val = range[i].value;
+			break;
+		}
+	}
+	return 0;
+}
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */

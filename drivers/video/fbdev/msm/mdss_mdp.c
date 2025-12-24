@@ -99,8 +99,19 @@ static struct mdss_panel_intf pan_types[] = {
 	{"edp", MDSS_PANEL_INTF_EDP},
 	{"hdmi", MDSS_PANEL_INTF_HDMI},
 };
-static char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
-
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 start*/
+char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 end*/
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 start*/
+enum {
+	UNKNOWN_PANEL,
+	HLT_JD9365D_720P_VIDEO_PANEL ,
+	LS_ILI9881C_720P_VIDEO_PANEL,
+	GX_ST7703_720P_VIDEO_PANEL,
+	TXD_HX8394F_720P_VIDEO_PANEL,
+	GX_HSD_ST7703_720P_VIDEO_PANEL
+};
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 end*/
 struct mdss_hw mdss_mdp_hw = {
 	.hw_ndx = MDSS_HW_MDP,
 	.ptr = NULL,
@@ -274,7 +285,22 @@ static int mdss_mdp_parse_dt_bus_scale(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_ppb_off(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_cdm(struct platform_device *pdev);
 static int mdss_mdp_parse_dt_dsc(struct platform_device *pdev);
-
+/*HS60 code for HS60-384 by wangqilin at 2019/08/20 start*/
+int mdss_mdp_parse_panel_id_kernel(void)
+{
+	int panel_id = UNKNOWN_PANEL;
+	if(strstr(mdss_mdp_panel,"qcom,mdss_dsi_hlt_jd9365d_720p_video"))
+		panel_id =  HLT_JD9365D_720P_VIDEO_PANEL;
+	if(strstr(mdss_mdp_panel,"qcom,mdss_dsi_ls_ili9881c_720p_video"))
+		panel_id =  LS_ILI9881C_720P_VIDEO_PANEL;
+	if(strstr(mdss_mdp_panel,"qcom,mdss_dsi_gx_st7703_720p_video"))
+		panel_id = GX_ST7703_720P_VIDEO_PANEL;
+	if(strstr(mdss_mdp_panel,"qcom,mdss_dsi_gx_hsd_st7703_720p_video"))
+		panel_id = GX_HSD_ST7703_720P_VIDEO_PANEL;
+	pr_info("%s panel_id :%d\n",__func__,panel_id);
+	return panel_id;
+}
+/*HS60 code for HS60-384 by wangqilin at 2019/08/20 end*/
 static inline u32 is_mdp_irq_enabled(void)
 {
 	struct mdss_data_type *mdata = mdss_mdp_get_mdata();
@@ -5252,7 +5278,9 @@ static int __init mdss_mdp_driver_init(void)
 	return 0;
 
 }
-
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 start*/
+EXPORT_SYMBOL(mdss_mdp_parse_panel_id_kernel);
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 end*/
 module_param_string(panel, mdss_mdp_panel, MDSS_MAX_PANEL_LEN, 0600);
 /*
  * panel=<lk_cfg>:<pan_intf>:<pan_intf_cfg>:<panel_topology_cfg>

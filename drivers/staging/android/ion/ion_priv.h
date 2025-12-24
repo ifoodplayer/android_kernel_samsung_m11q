@@ -577,4 +577,7 @@ int ion_phys_nolock(struct ion_client *client, struct ion_handle *handle,
  */
 struct ion_handle *ion_import_dma_buf_fd_nolock(struct ion_client *client, int fd);
 
+void show_ion_system_heap_size(struct seq_file *s);
+void show_ion_system_heap_pool_size(struct ion_device *dev, struct seq_file *s);
+void show_ion_system_heap_pool_size_locked(struct seq_file *s);
 #endif /* _ION_PRIV_H */

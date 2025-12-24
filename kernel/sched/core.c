@@ -98,6 +98,8 @@
 #include <trace/events/sched.h>
 #include "walt.h"
 
+#include <linux/sec_debug.h>
+
 ATOMIC_NOTIFIER_HEAD(load_alert_notifier_head);
 
 DEFINE_MUTEX(sched_domains_mutex);
@@ -3636,6 +3638,7 @@ static void __sched notrace __schedule(bool preempt)
 		++*switch_count;
 
 		trace_sched_switch(preempt, prev, next);
+		sec_debug_task_sched_log(cpu, preempt, next, prev);
 		rq = context_switch(rq, prev, next, &rf); /* unlocks the rq */
 	} else {
 		update_task_ravg(prev, rq, TASK_UPDATE, wallclock, 0);

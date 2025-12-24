@@ -29,11 +29,22 @@
 #include "mdss_dba_utils.h"
 #endif
 #include "mdss_debug.h"
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#include <kernel_project_defines.h>
+bool hs50_kernel_power_off;
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
 
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 start*/
+extern char mdss_mdp_panel[MDSS_MAX_PANEL_LEN];
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 end*/
 #define DT_CMD_HDR 6
 #define DEFAULT_MDP_TRANSFER_TIME 14000
 
 #define VSYNC_DELAY msecs_to_jiffies(17)
+
+#ifdef HQ_FACTORY_BUILD
+struct device_node *wdy_pan_node = NULL;
+#endif /* HQ_FACTORY_BUILD */
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
@@ -212,13 +223,13 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
-
-static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
+/*HS70 code for HS70-7 by wangdeyan at 2019/10/01 start*/
+static char led_pwm1[3] = {0x51, 0x0 ,0x0};	/* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc backlight_cmd = {
-	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
+	{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(led_pwm1)},
 	led_pwm1
 };
-
+/*HS70 code for HS70-7 by wangdeyan at 2019/10/01 end*/
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
@@ -231,8 +242,20 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 	}
 
 	pr_debug("%s: level=%d\n", __func__, level);
-
-	led_pwm1[1] = (unsigned char)level;
+/*HS70 code for HS70-7 by wangdeyan at 2019/10/01 start*/
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 start*/
+if(ctrl->panel_data.panel_info.bklt_dcs_ctrl_mode == CTRL_MODE_0X0FFF) {
+	led_pwm1[1] = (unsigned char)((level & 0x0f00) >> 8);
+	led_pwm1[2] = (unsigned char)(level & 0x00ff);
+}else if(ctrl->panel_data.panel_info.bklt_dcs_ctrl_mode == CTRL_MODE_0XFF0F) {
+	led_pwm1[1] = (unsigned char)((level >> 4) & 0x00ff);
+	led_pwm1[2] = (unsigned char)level & 0x000f;
+} else {
+	led_pwm1[1] = (unsigned char)((level & 0x0f00) >> 8);
+	led_pwm1[2] = (unsigned char)(level & 0x00ff);
+}
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 end*/
+/*HS70 code for HS70-7 by wangdeyan at 2019/10/01 end*/
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = &backlight_cmd;
@@ -360,7 +383,9 @@ rst_gpio_err:
 disp_en_gpio_err:
 	return rc;
 }
-
+/*HS70 code for HS70-5877 by liufurong at 2020/07/27 start*/
+bool g_system_is_shutdown = 0;
+/*HS70 code for HS70-5877 by liufurong at 2020/07/27 start*/
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -517,7 +542,24 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			usleep_range(100, 110);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+		if (hs50_kernel_power_off && ctrl_pdata->panel_data.panel_info.reset_force_pull_low) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		} else if (ctrl_pdata->panel_data.panel_info.reset_keephigh) {
+			gpio_set_value((ctrl_pdata->rst_gpio), 1);
+		}
+#else
+		/*HS70 code for SR-ZQL1871-01-94 HS70-5877 by liufurong at 2020/07/27 start*/
+		if (ctrl_pdata->panel_data.panel_info.reset_keephigh && g_system_is_shutdown == 0)
+			gpio_set_value((ctrl_pdata->rst_gpio), 1);
+		else
+		{
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		}
+		/*HS70 code for SR-ZQL1871-01-94 HS70-5877 by liufurong at 2020/07/27 end*/
+#endif
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
@@ -1133,7 +1175,7 @@ static void mdss_dsi_parse_trigger(struct device_node *np, char *trigger,
 }
 
 
-static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
+int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 		struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key)
 {
 	const char *data;
@@ -1211,7 +1253,7 @@ static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
 			pcmds->link_state = DSI_LP_MODE;
 	}
 
-	pr_debug("%s: dcs_cmd=%x len=%d, cmd_cnt=%d link_state=%d\n", __func__,
+	pr_err("[LCD sorting] %s: dcs_cmd=%x len=%d, cmd_cnt=%d link_state=%d\n", __func__,
 		pcmds->buf[0], pcmds->blen, pcmds->cmd_cnt, pcmds->link_state);
 
 	return 0;
@@ -2001,7 +2043,12 @@ static void mdss_dsi_parse_esd_params(struct device_node *np,
 
 	pinfo->esd_check_enabled = of_property_read_bool(np,
 		"qcom,esd-check-enabled");
-
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 start*/
+	if(strstr(mdss_mdp_panel, "esd_disabled")) {
+		pr_err("No panel, add esd_disabled kernel\n");
+		pinfo->esd_check_enabled = false;
+	}
+/*HS60 code for HS60-54 by wangqilin at 2019/07/17 end*/
 	if (!pinfo->esd_check_enabled)
 		return;
 
@@ -2392,6 +2439,7 @@ int mdss_dsi_panel_timing_switch(struct mdss_dsi_ctrl_pdata *ctrl,
 	struct mdss_panel_info *pinfo = &ctrl->panel_data.panel_info;
 	int i;
 
+	pr_err("[LCD sorting] ctrl node is %p\n",ctrl);
 	if (!timing)
 		return -EINVAL;
 
@@ -2568,8 +2616,32 @@ static int  mdss_dsi_panel_config_res_properties(struct device_node *np,
 		bool default_timing)
 {
 	int rc = 0;
+#ifdef HQ_FACTORY_BUILD
+	struct device_node *chosen = NULL;
+	const char *wdy_panel = NULL;
+	const char *chose_panel = NULL;
+
+	pr_err("[LCD sorting] device node is %p\n",np);
+#endif /* HQ_FACTORY_BUILD */
 
 	mdss_dsi_parse_roi_alignment(np, pt);
+
+#ifdef HQ_FACTORY_BUILD
+	chosen = of_find_node_by_name(NULL, "chosen");
+	if (NULL == chosen)
+		pr_err("[LCD sorting] chosen node is not found\n");
+	else {
+		of_property_read_string(chosen, "bootargs", &wdy_panel);
+	}
+	chose_panel = of_get_property(np, "qcom,mdss-dsi-panel-flag", NULL);
+	if (chose_panel){
+		if (NULL != strstr(wdy_panel, chose_panel)) {
+			wdy_pan_node = np;
+    	}
+	} else {
+		pr_err("[LCD sorting] no need to reload");
+	}
+#endif /* HQ_FACTORY_BUILD */
 
 	mdss_dsi_parse_dcs_cmds(np, &pt->on_cmds,
 		"qcom,mdss-dsi-on-command",
@@ -2779,6 +2851,28 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-bl-max-level", &tmp);
 	pinfo->bl_max = (!rc ? tmp : 255);
 	ctrl_pdata->bklt_max = pinfo->bl_max;
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 start*/
+	rc = of_property_read_u32(np, "qcom,bklt-dcs-ctrl-mode", &tmp);
+	pinfo->bklt_dcs_ctrl_mode = (!rc ? tmp : CTRL_MODE_UNKNOWN);
+	pr_info("pinfo->bklt_dcs_ctrl_mode = %d rc = %d\n",pinfo->bklt_dcs_ctrl_mode,rc);
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 end*/
+
+	/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 start*/
+	rc = of_property_read_u32(np, "qcom,mdss-dsi-reset-delay-vsp-ms", &tmp);
+	pinfo->reset_delay_vsp_ms = (!rc ? tmp : 0);
+	pr_info("pinfo->reset_delay_vsp_ms = %d rc = %d\n",pinfo->reset_delay_vsp_ms,rc);
+	/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 end*/
+	/*HS70 code for SR-ZQL1871-01-94 by liufurong at 2019/10/25 start*/
+	pinfo->reset_keephigh = of_property_read_bool(np,"qcom,mdss-dsi-reset-keephigh");
+	/*HS70 code for SR-ZQL1871-01-94 by liufurong at 2019/10/25 end*/
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+	pinfo->reset_force_pull_low = of_property_read_bool(np,"qcom,mdss-dsi-reset-force-pull-low");
+#endif
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#ifdef HQ_FACTORY_BUILD
+	pinfo->reload_flag = of_property_read_bool(np,"qcom,mdss-dsi-code-reload-flag");
+#endif /* HQ_FACTORY_BUILD */
 
 	rc = of_property_read_u32(np, "qcom,mdss-dsi-interleave-mode", &tmp);
 	pinfo->mipi.interleave_mode = (!rc ? tmp : 0);

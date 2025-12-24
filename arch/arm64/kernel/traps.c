@@ -46,6 +46,8 @@
 #include <asm/sysreg.h>
 #include <trace/events/exception.h>
 
+#include <linux/sec_debug.h>
+
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -326,6 +328,11 @@ void die(const char *str, struct pt_regs *regs, int err)
 		bug_type = report_bug(regs->pc, regs);
 	if (bug_type != BUG_TRAP_TYPE_NONE && !strlen(str))
 		str = "Oops - BUG";
+
+	sec_debug_sched_msg("!!die!!");
+	sec_debug_sched_msg("!!die!!");
+
+	sec_debug_summary_save_die_info(str, regs);
 
 	ret = __die(str, err, regs);
 
@@ -800,6 +807,9 @@ const char *esr_get_class_string(u32 esr)
 asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 {
 	console_verbose();
+
+	sec_debug_save_badmode_info(reason, handler[reason],
+			esr, esr_get_class_string(esr));
 
 	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
 		handler[reason], smp_processor_id(), esr,

@@ -1042,6 +1042,11 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY: %s:%s, init start\n",mmc_hostname(host),__func__);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 
 	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
 	if (err)
@@ -1144,6 +1149,11 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 
 	card->clk_scaling_highest = mmc_sd_get_max_clock(card);
 	card->clk_scaling_lowest = host->f_min;
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY: %s:%s, init end\n",mmc_hostname(host),__func__);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 
 	return 0;
 
@@ -1341,6 +1351,12 @@ static int _mmc_sd_resume(struct mmc_host *host)
 			printk(KERN_ERR "%s: Re-init card rc = %d (retries = %d)\n",
 			       mmc_hostname(host), err, retries);
 			retries--;
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+			if(host->ops->get_cd)
+				printk(KERN_ERR "TQY: %s: card is: %d\n",mmc_hostname(host),host->ops->get_cd(host));
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
 			mmc_power_off(host);
 			usleep_range(5000, 5500);
 			mmc_power_up(host, host->card->ocr);
@@ -1358,6 +1374,9 @@ static int _mmc_sd_resume(struct mmc_host *host)
 		mmc_card_set_removed(host->card);
 		mmc_detect_change(host, msecs_to_jiffies(200));
 	} else if (err) {
+		/*huaiqn add for P200309-07335 by xudayi at 2020/04/29 start */
+		mmc_card_clr_suspended(host->card);
+		/*huaiqn add for P200309-07335 by xudayi at 2020/04/29 end */
 		goto out;
 	}
 	mmc_card_clr_suspended(host->card);
@@ -1472,9 +1491,27 @@ int mmc_attach_sd(struct mmc_host *host)
 
 	BUG_ON(!host);
 	WARN_ON(!host->claimed);
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	 pr_err("TQY: %s:%s, attach start \n", mmc_hostname(host),__func__);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
+// HS60 code added by tangqingyong for HS60-401 at 20190830 start
+	mmc_power_off(host);
+	usleep_range(5000, 5500);
+	mmc_power_up(host, host->ocr_avail);
+	usleep_range(5000, 5500);
+// HS60 code added by tangqingyong for HS60-401 at 20190830 end
 
 	err = mmc_send_app_op_cond(host, 0, &ocr);
-	if (err)
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	if (err){
+			pr_err("TQY: %s: error %d ocr:0x%x\n", mmc_hostname(host), err,ocr);
+		}
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
+	if(err)
 		return err;
 
 	mmc_attach_bus(host, &mmc_sd_ops);
@@ -1499,6 +1536,11 @@ int mmc_attach_sd(struct mmc_host *host)
 	 */
 	if (!rocr) {
 		err = -EINVAL;
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+		pr_err("TQY: %s: Do not support voltage\n",mmc_hostname(host));
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 		goto err;
 	}
 
@@ -1543,6 +1585,11 @@ int mmc_attach_sd(struct mmc_host *host)
 		mmc_release_host(host);
 		goto remove_card;
 	}
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY: %s:%s, attach end \n", mmc_hostname(host),__func__);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 
 	return 0;
 

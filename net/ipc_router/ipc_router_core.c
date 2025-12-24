@@ -239,6 +239,13 @@ static int is_sensor_port(struct msm_ipc_router_remote_port *rport)
 
 	if (rport && rport->server) {
 		svcid = rport->server->name.service;
+		/* HS60 code for HS60-3262 by zhuqiang at 2019/10/29 start */
+		if (svcid == 277)
+		{
+			//IPC_RTR_ERR("%s: only hold wakelock for proximity\n", __func__);
+			return false;
+		}
+		/* HS60 code for HS60-3262 by zhuqiang at 2019/10/29 end */
 		if (svcid == 400 || (svcid >= 256 && svcid <= 320))
 			return true;
 	}

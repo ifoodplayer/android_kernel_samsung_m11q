@@ -39,7 +39,9 @@
 #include "qg-soc.h"
 #include "qg-battery-profile.h"
 #include "qg-defs.h"
-
+/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 start */
+#include <kernel_project_defines.h>
+/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 end */
 static int qg_debug_mask;
 module_param_named(
 	debug_mask, qg_debug_mask, int, 0600
@@ -585,7 +587,8 @@ done:
 	chip->last_fifo_update_time = ktime_get();
 	return rc;
 }
-
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
 static int qg_vbat_thresholds_config(struct qpnp_qg *chip)
 {
 	int rc, temp = 0, vbat_mv;
@@ -596,7 +599,8 @@ static int qg_vbat_thresholds_config(struct qpnp_qg *chip)
 		pr_err("Failed to read batt_temp rc=%d\n", rc);
 		return rc;
 	}
-
+/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 	vbat_mv = (temp < chip->dt.cold_temp_threshold) ?
 			chip->dt.vbatt_empty_cold_mv :
 			chip->dt.vbatt_empty_mv;
@@ -1515,7 +1519,13 @@ static const char *qg_get_battery_type(struct qpnp_qg *chip)
 }
 
 #define DEBUG_BATT_SOC		67
-#define BATT_MISSING_SOC	50
+/*Huaqin add for HS61-1551 Update soc by wangzikang at 2019/09/26 start*/
+#if defined(HQ_FACTORY_BUILD)
+#define BATT_MISSING_SOC	 20
+#else
+#define BATT_MISSING_SOC	 50
+#endif
+/*Huaqin add for HS61-1551 Update soc by wangzikang at 2019/09/26 end*/
 #define EMPTY_SOC		0
 #define FULL_SOC		100
 static int qg_get_battery_capacity(struct qpnp_qg *chip, int *soc)
@@ -1541,7 +1551,10 @@ static int qg_get_battery_capacity(struct qpnp_qg *chip, int *soc)
 		*soc = chip->maint_soc;
 	else
 		*soc = chip->msoc;
-
+	/*Huaqin added for P200709-06720  hold soc=100 if it beyond 100 by wangzikang at 2020/07/15 start */
+	if (*soc > FULL_SOC)
+		*soc = FULL_SOC;
+	/*Huaqin added for P200709-06720  hold soc=100 if it beyond 100 by wangzikang at 2020/07/15 end */
 	mutex_unlock(&chip->soc_lock);
 
 	return 0;
@@ -1696,6 +1709,14 @@ static int qg_psy_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ESR_NOMINAL:
 		chip->esr_nominal = pval->intval;
 		break;
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	case POWER_SUPPLY_PROP_BATTERY_CYCLE:
+		chip->batt_cycle = pval->intval;
+		pr_err("BATTERY_CYCLE(%d)\n", chip->batt_cycle);
+		break;
+	#endif
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 end */
 	default:
 		break;
 	}
@@ -1813,6 +1834,11 @@ static int qg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_QG_VBMS_MODE:
 		pval->intval = !!chip->dt.qg_vbms_mode;
 		break;
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+	case POWER_SUPPLY_PROP_BATT_ID_ERROR:
+		pval->intval = chip->batt_id_error;
+		break;
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 	default:
 		pr_debug("Unsupported property %d\n", psp);
 		break;
@@ -1866,6 +1892,9 @@ static enum power_supply_property qg_psy_props[] = {
 	POWER_SUPPLY_PROP_SOH,
 	POWER_SUPPLY_PROP_CC_SOC,
 	POWER_SUPPLY_PROP_QG_VBMS_MODE,
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+	POWER_SUPPLY_PROP_BATT_ID_ERROR,
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 };
 
 static const struct power_supply_desc qg_psy_desc = {
@@ -2083,6 +2112,115 @@ static int qg_handle_battery_insertion(struct qpnp_qg *chip)
 	return 0;
 }
 
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 start */
+#define CUSTOM_BAT_HIGH_TEMP_DOWM_THRESHOLD		450
+#define CUSTOM_BAT_HIGH_TEMP_RESUME_THRESHOLD		440
+#define CUSTOM_BAT_HIGH_TEMP_RECHARGE_THRESHOLD	        4130
+/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 end*/
+#define CUSTOM_BAT_HIGH_TEMP_RECHARGE_THRESHOLD_SDI		4030
+/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 end*/
+/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 end */
+static int qg_battery_aging_update(struct qpnp_qg *chip)
+{
+	int rc, cycle_count = 0, vbat = 0;
+	union power_supply_propval prop = {0, };
+	/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 start */
+	int battery_temperature = 0;
+	/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 end */
+	/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 start*/
+	int custom_recharge_threshold = 4030;
+	if ((chip->batt_id_ohm_default == 150000) && (chip->batt_id_ohm > 170000))
+	{
+		custom_recharge_threshold = CUSTOM_BAT_HIGH_TEMP_RECHARGE_THRESHOLD_SDI;
+		pr_debug("SDI Threshold  =  %d.\n", custom_recharge_threshold);
+	}
+	else
+	{
+		custom_recharge_threshold = CUSTOM_BAT_HIGH_TEMP_RECHARGE_THRESHOLD;
+		pr_debug("Threshold  =  %d.\n", custom_recharge_threshold);
+	}
+	/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 end*/
+
+	/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 start */
+	rc = qg_get_battery_temp(chip, &battery_temperature);
+	if (rc < 0)
+	{
+		pr_err("Failed to get battery temperature, rc=%d\n", rc);
+	}
+	/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 end */
+
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 start */
+	/*rc = get_cycle_count(chip->counter, &cycle_count);
+	if (rc < 0) {
+		pr_err("Failed to get cycle count, rc=%d\n", rc);
+		return 0;
+	}
+
+	if (cycle_count % 50)
+		return 0;
+*/
+	cycle_count = chip->batt_cycle;
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 end */
+
+	rc = get_val(chip->vfloat_data, cycle_count, &vbat);
+	if (rc < 0) {
+		pr_err("Failed to get vfloat, rc=%d\n", rc);
+		return 0;
+	}
+	chip->bp.float_volt_uv = vbat;
+
+	rc = get_val(chip->vbat_rechg_data, cycle_count, &vbat);
+	if (rc < 0) {
+		pr_err("Failed to get vbat-rechg, rc=%d\n", rc);
+		return 0;
+	}
+
+	if (!is_batt_available(chip))
+		return 0;
+
+	prop.intval = chip->bp.float_volt_uv;
+	rc = power_supply_set_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_VOLTAGE_MAX, &prop);
+	if (rc < 0) {
+		pr_err("Failed to set voltage_max property on batt_psy, rc=%d\n",
+			rc);
+		return 0;
+	}
+	/* HS60 add for P191031-07911 by wangzikang at 2019/11/08 start */
+	/* HS60 add for ZQL1693-56 Optimize the charging experience at temperature 45~50 by gaochao at 2019/11/14 start */
+	//prop.intval = vbat / 1000;
+	if (battery_temperature >= CUSTOM_BAT_HIGH_TEMP_DOWM_THRESHOLD)
+	{
+		/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 start*/
+		prop.intval = custom_recharge_threshold;
+		/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 end*/
+	}
+	else if (battery_temperature < CUSTOM_BAT_HIGH_TEMP_RESUME_THRESHOLD)
+	{
+		prop.intval = vbat / 1000;
+	}
+	else
+	{
+		/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 start*/
+        prop.intval = custom_recharge_threshold;
+		/*HS70 add for HS70-5059 Optimize the charging experience of SDI at temperature 45~50 by wangzikang at 2020/03/31 end*/
+		pr_debug("[%s]line=%d, Keep recharge status, recharge_threshold=%d mV",
+			__FUNCTION__, __LINE__, prop.intval);
+	}
+	/* HS60 add for P191031-07911 by wangzikang at 2019/11/08 end */
+	rc = power_supply_set_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_RECHARGE_VBAT, &prop);
+	if (rc < 0) {
+		pr_err("Failed to set recharge voltage property on batt_psy, rc=%d\n",
+			rc);
+	}
+	return 0;
+}
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
+
 static int qg_battery_status_update(struct qpnp_qg *chip)
 {
 	int rc;
@@ -2191,6 +2329,15 @@ static void qg_status_change_work(struct work_struct *work)
 		pr_err("Failed in charge_full_update, rc=%d\n", rc);
 
 	ttf_update(chip->ttf, chip->usb_present);
+
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	if (chip->bp.qg_batt_aging_enable)
+	{
+		qg_battery_aging_update(chip);
+	}
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 out:
 	pm_relax(chip->dev);
 }
@@ -2430,19 +2577,89 @@ unregister_chrdev:
 
 #define BID_RPULL_OHM		100000
 #define BID_VREF_MV		1875
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+#define WORK_AROUND_BATT_ID_DELAY 100
+#define WORK_AROUND_DETECT_TIMES_ID 3
+
+/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 start */
+u32 hq_get_huaqin_pcba_config(void);
+u32 hq_board_pcba_config(void);
+#define HQ_ZQL1635_DEFAULT_BATT_ID 200000
+/* ZQL1635 */
+enum
+{
+	HQ_PCBA_ROW_ZQL1635 = 0x1d,
+	HQ_PCBA_PRC_ZQL1635,
+	HQ_PCBA_LATAM_ZQL1635,
+};
+
+#define PCB_MASK_HQ		0xFF0
+#define PCB_SHIFT_HQ		4
+/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 end */
 static int get_batt_id_ohm(struct qpnp_qg *chip, u32 *batt_id_ohm)
 {
-	int rc, batt_id_mv;
+	/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 start */
+	//int rc, batt_id_mv;
+	int rc, batt_id_mv, pcba_config;
+	/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 end */
 	int64_t denom;
 	struct qpnp_vadc_result result;
+	int re_detect_cycle;
 
 	/* Read battery-id */
 	rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_ID_PU2, &result);
-	if (rc) {
-		pr_err("Failed to read BATT_ID over vadc, rc=%d\n", rc);
-		return rc;
-	}
 
+	if (rc)
+	{
+		pr_err("[%s]Failed to read BATT_ID over vadc, rc=%d;re-detect BATT_ID after 100ms.\n", __func__,rc);
+		re_detect_cycle = 0;
+		mdelay(WORK_AROUND_BATT_ID_DELAY);		//delay 100ms
+
+		while ((re_detect_cycle < WORK_AROUND_DETECT_TIMES_ID) && (rc))
+		{
+			rc = qpnp_vadc_read(chip->vadc_dev, VADC_BAT_ID_PU2, &result);
+			pr_err("[%s]Re-detect BATT_ID, result.physical = %lld \n", __func__,result.physical);
+			if (rc)
+			{
+				pr_err("[%s]Failed to read BATT_ID over vadc again, times = %d, rc=%d;re-detect BATT_ID after 100ms.\n", __func__,re_detect_cycle , rc);
+				mdelay(WORK_AROUND_BATT_ID_DELAY);
+			}
+			re_detect_cycle++;
+		}
+		if (rc){
+			/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
+			/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 start */
+			rc = hq_board_pcba_config();
+			if (rc)
+			{
+				pr_err("Failed to get PCBA Config!");
+			}
+			else
+			{
+				pcba_config = hq_get_huaqin_pcba_config();
+				pr_info("[%s]line=%d: pcba_config=0x%x, match=%d\n",
+						__FUNCTION__, __LINE__, pcba_config, ((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ));
+				#if defined (HUAQIN_KERNEL_PROJECT_HS60)
+				if ((((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_ROW_ZQL1635)
+					|| (((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_PRC_ZQL1635)
+					|| (((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_LATAM_ZQL1635))
+				{
+					chip->batt_id_ohm_default = HQ_ZQL1635_DEFAULT_BATT_ID;
+					pr_err("[%s]chip->batt_id_ohm_default = %d , rc=%d, PCBA = 0x%x!",
+						__func__ , chip->batt_id_ohm_default, rc, pcba_config);
+				}
+				#endif
+			}
+			*batt_id_ohm = chip->batt_id_ohm_default;
+			pr_err("[%s]Finally, failed to read BATT_ID over vadc , rc=%d;Force to set HS60 batt_id to %dK!",__func__,rc,chip->batt_id_ohm_default/1000);
+			/*HS60 & HS70 add for HS60-5163  by wangzikang at 2020/02/20 end */
+			/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
+			chip->batt_id_error = 1;
+
+			return 0;
+		}
+	}
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 	batt_id_mv = div_s64(result.physical, 1000);
 	if (batt_id_mv == 0) {
 		pr_debug("batt_id_mv = 0 from ADC\n");
@@ -2462,6 +2679,77 @@ static int get_batt_id_ohm(struct qpnp_qg *chip, u32 *batt_id_ohm)
 
 	return 0;
 }
+
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+static int read_range_data_from_node(struct device_node *node,
+		const char *prop_str, struct range_data *ranges,
+		u32 max_threshold, u32 max_value)
+{
+	int rc = 0, i, length, per_tuple_length, tuples;
+
+	rc = of_property_count_elems_of_size(node, prop_str, sizeof(u32));
+	if (rc < 0) {
+		pr_err("Count %s failed, rc=%d\n", prop_str, rc);
+		return rc;
+	}
+
+	length = rc;
+	per_tuple_length = sizeof(struct range_data) / sizeof(u32);
+	if (length % per_tuple_length) {
+		pr_err("%s length (%d) should be multiple of %d\n",
+				prop_str, length, per_tuple_length);
+		return -EINVAL;
+	}
+	tuples = length / per_tuple_length;
+
+	if (tuples > MAX_VFLOAT_ENTRIES) {
+		pr_err("too many entries(%d), only %d allowed\n",
+				tuples, MAX_VFLOAT_ENTRIES);
+		return -EINVAL;
+	}
+
+	rc = of_property_read_u32_array(node, prop_str,
+			(u32 *)ranges, length);
+	if (rc) {
+		pr_err("Read %s failed, rc=%d", prop_str, rc);
+		return rc;
+	}
+
+	for (i = 0; i < tuples; i++) {
+		if (ranges[i].low_threshold >
+				ranges[i].high_threshold) {
+			pr_err("%s thresholds should be in ascendant ranges\n",
+						prop_str);
+			rc = -EINVAL;
+			goto clean;
+		}
+
+		if (i != 0) {
+			if (ranges[i - 1].high_threshold >
+					ranges[i].low_threshold) {
+				pr_err("%s thresholds should be in ascendant ranges\n",
+							prop_str);
+				rc = -EINVAL;
+				goto clean;
+			}
+		}
+
+		if (ranges[i].low_threshold > max_threshold)
+			ranges[i].low_threshold = max_threshold;
+		if (ranges[i].high_threshold > max_threshold)
+			ranges[i].high_threshold = max_threshold;
+		if (ranges[i].value > max_value)
+			ranges[i].value = max_value;
+	}
+
+	return rc;
+clean:
+	memset(ranges, 0, tuples * sizeof(struct range_data));
+	return rc;
+}
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 
 static int qg_load_battery_profile(struct qpnp_qg *chip)
 {
@@ -2521,6 +2809,38 @@ static int qg_load_battery_profile(struct qpnp_qg *chip)
 			chip->bp.batt_type_str, chip->bp.float_volt_uv,
 			chip->bp.fastchg_curr_ma);
 
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chip->bp.qg_batt_aging_enable = of_property_read_bool(profile_node,
+						 "qcom,qg-batt-aging-enable");
+
+	if (chip->bp.qg_batt_aging_enable) {
+		rc = read_range_data_from_node(profile_node,
+				"qcom,vfloat-ranges",
+				chip->vfloat_data,
+				MAX_CYCLE_COUNT,
+				chip->bp.float_volt_uv);
+		if (rc < 0) {
+			pr_err("Read qcom,vfloat-ranges failed from battery profile, rc=%d\n",
+					rc);
+			chip->bp.qg_batt_aging_enable = false;
+			return 0;
+		}
+
+		rc = read_range_data_from_node(profile_node,
+				"qcom,vbat-rechg-ranges",
+				chip->vbat_rechg_data,
+				MAX_CYCLE_COUNT,
+				chip->bp.float_volt_uv);
+		if (rc < 0) {
+			pr_err("Read qcom,vbat-rechg-ranges failed from battery profile, rc=%d\n",
+					rc);
+			chip->bp.qg_batt_aging_enable = false;
+		}
+	}
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
+
 	return 0;
 }
 
@@ -2536,6 +2856,9 @@ static int qg_setup_battery(struct qpnp_qg *chip)
 	} else {
 		/* battery present */
 		rc = get_batt_id_ohm(chip, &chip->batt_id_ohm);
+		/*HS60 add for ZQL169XFAC-45 by wangzikang at 2019/11/30 start*/
+		pr_err("Battery ID has been detected as %d\n", chip->batt_id_ohm);
+		/*HS60 add for ZQL169XFAC-45 by wangzikang at 2019/11/30 start*/
 		if (rc < 0) {
 			pr_err("Failed to detect batt_id rc=%d\n", rc);
 			chip->profile_loaded = false;
@@ -2577,9 +2900,19 @@ static int qg_determine_pon_soc(struct qpnp_qg *chip)
 	char ocv_type[20] = "NONE";
 
 	if (!chip->profile_loaded) {
-		qg_dbg(chip, QG_DEBUG_PON, "No Profile, skipping PON soc\n");
+		/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+		//qg_dbg(chip, QG_DEBUG_PON, "No Profile, skipping PON soc\n");
+		pr_err("No Profile, skipping PON soc\n");
+		/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 		return 0;
 	}
+
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	/* Update the vfloat based on cycle_count*/
+	qg_battery_aging_update(chip);
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 
 	/* read all OCVs */
 	for (i = S7_PON_OCV; i < PON_OCV_MAX; i++) {
@@ -2589,8 +2922,12 @@ static int qg_determine_pon_soc(struct qpnp_qg *chip)
 			pr_err("Failed to read %s OCV rc=%d\n",
 					ocv[i].ocv_type, rc);
 		else
-			qg_dbg(chip, QG_DEBUG_PON, "%s OCV=%d\n",
+			/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+			/*qg_dbg(chip, QG_DEBUG_PON, "%s OCV=%d\n",
+					ocv[i].ocv_type, ocv[i].ocv_uv);*/
+			pr_err( "%s OCV=%d\n",
 					ocv[i].ocv_type, ocv[i].ocv_uv);
+			/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 	}
 
 	rc = qg_get_battery_temp(chip, &batt_temp);
@@ -2616,8 +2953,16 @@ static int qg_determine_pon_soc(struct qpnp_qg *chip)
 		pr_err("Failed to lookup S7_PON SOC rc=%d\n", rc);
 		goto done;
 	}
-
-	qg_dbg(chip, QG_DEBUG_PON, "Shutdown: Valid=%d SOC=%d OCV=%duV time=%dsecs temp=%d, time_now=%ldsecs temp_now=%d S7_soc=%d\n",
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+	/*qg_dbg(chip, QG_DEBUG_PON, "Shutdown: Valid=%d SOC=%d OCV=%duV time=%dsecs temp=%d, time_now=%ldsecs temp_now=%d S7_soc=%d\n",
+			shutdown[SDAM_VALID],
+			shutdown[SDAM_SOC],
+			shutdown[SDAM_OCV_UV],
+			shutdown[SDAM_TIME_SEC],
+			shutdown[SDAM_TEMP],
+			rtc_sec, batt_temp,
+			pon_soc);*/
+	pr_err("Shutdown: Valid=%d SOC=%d OCV=%duV time=%dsecs temp=%d, time_now=%ldsecs temp_now=%d S7_soc=%d\n",
 			shutdown[SDAM_VALID],
 			shutdown[SDAM_SOC],
 			shutdown[SDAM_OCV_UV],
@@ -2625,6 +2970,7 @@ static int qg_determine_pon_soc(struct qpnp_qg *chip)
 			shutdown[SDAM_TEMP],
 			rtc_sec, batt_temp,
 			pon_soc);
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 	/*
 	 * Use the shutdown SOC if
 	 * 1. SDAM read is a success & SDAM data is valid
@@ -2651,8 +2997,10 @@ static int qg_determine_pon_soc(struct qpnp_qg *chip)
 	ocv_uv = shutdown[SDAM_OCV_UV];
 	soc = shutdown[SDAM_SOC];
 	strlcpy(ocv_type, "SHUTDOWN_SOC", 20);
-	qg_dbg(chip, QG_DEBUG_PON, "Using SHUTDOWN_SOC @ PON\n");
-
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+	//qg_dbg(chip, QG_DEBUG_PON, "Using SHUTDOWN_SOC @ PON\n");
+	pr_err("Using SHUTDOWN_SOC @ PON\n");
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 use_pon_ocv:
 	if (use_pon_ocv == true) {
 		if (ocv[S3_LAST_OCV].ocv_raw == FIFO_V_RESET_VAL) {
@@ -2711,10 +3059,14 @@ use_pon_ocv:
 						(full_soc - cutoff_soc));
 		else
 			soc = pon_soc;
-
-		qg_dbg(chip, QG_DEBUG_PON, "v_float=%d v_cutoff=%d FULL_SOC=%d CUTOFF_SOC=%d PON_SYS_SOC=%d pon_soc=%d\n",
+		/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+		/*qg_dbg(chip, QG_DEBUG_PON, "v_float=%d v_cutoff=%d FULL_SOC=%d CUTOFF_SOC=%d PON_SYS_SOC=%d pon_soc=%d\n",
+			chip->bp.float_volt_uv, chip->dt.vbatt_cutoff_mv * 1000,
+			full_soc, cutoff_soc, soc, pon_soc);*/
+		pr_err("v_float=%d v_cutoff=%d FULL_SOC=%d CUTOFF_SOC=%d PON_SYS_SOC=%d pon_soc=%d\n",
 			chip->bp.float_volt_uv, chip->dt.vbatt_cutoff_mv * 1000,
 			full_soc, cutoff_soc, soc, pon_soc);
+		/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 	}
 done:
 	if (rc < 0) {
@@ -2738,10 +3090,12 @@ done:
 	rc = qg_store_soc_params(chip);
 	if (rc < 0)
 		pr_err("Failed to update sdam params rc=%d\n", rc);
-
-	pr_info("using %s @ PON ocv_uv=%duV soc=%d\n",
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 start */
+	/*pr_info("using %s @ PON ocv_uv=%duV soc=%d\n",
+			ocv_type, ocv_uv, chip->msoc);*/
+	pr_err("using %s @ PON ocv_uv=%duV soc=%d\n",
 			ocv_type, ocv_uv, chip->msoc);
-
+	/* HS60 add for HS60-1602 open capacity log by wangzikang at 2019/09/18 end */
 	/* SOC reporting is now ready */
 	chip->soc_reporting_ready = 1;
 
@@ -3194,7 +3548,9 @@ static int qg_alg_init(struct qpnp_qg *chip)
 #define DEFAULT_ITERM_MA		100
 #define DEFAULT_S2_FIFO_LENGTH		5
 #define DEFAULT_S2_VBAT_LOW_LENGTH	2
-#define DEFAULT_S2_ACC_LENGTH		128
+/*Huaqin add for HS61-1616 Update soc by wangzikang at 2019/10/04 start*/
+#define DEFAULT_S2_ACC_LENGTH		64			//128 -->64
+/*Huaqin add for HS61-1616 Update soc by wangzikang at 2019/10/04 end*/
 #define DEFAULT_S2_ACC_INTVL_MS		100
 #define DEFAULT_DELTA_SOC		1
 #define DEFAULT_SHUTDOWN_SOC_SECS	360
@@ -3218,6 +3574,10 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 	struct device_node *revid_node, *child, *node = chip->dev->of_node;
 	u32 base, temp;
 	u8 type;
+	/*HS60 added for HS60-5473 Optimize the charge expierience for HS60 with 4000mAh battery by wangzikang at 2020/04/07 start */
+	u32 pcba_config = 0;
+	pcba_config = hq_get_huaqin_pcba_config();
+	/*HS60 added for HS60-5473 Optimize the charge expierience for HS60 with 4000mAh battery by wangzikang at 2020/04/07 end */
 
 	if (!node)  {
 		pr_err("Failed to find device-tree node\n");
@@ -3272,6 +3632,11 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 		pr_err("QG device node missing\n");
 		return -EINVAL;
 	}
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
+	rc = of_property_read_u32(node, "qcom,batt_id_ohm_default", &chip->batt_id_ohm_default);
+	if (rc < 0)
+		pr_err("qcom,batt_id_ohm_default is incorrect\n");
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
 
 	/* S2 state params */
 	rc = of_property_read_u32(node, "qcom,s2-fifo-length", &temp);
@@ -3288,7 +3653,12 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 
 	rc = of_property_read_u32(node, "qcom,s2-acc-length", &temp);
 	if (rc < 0)
+	//Huaqin add for HS61-1616 Update soc by wangzikang at 2019/09/26 start
+	{
 		chip->dt.s2_acc_length = DEFAULT_S2_ACC_LENGTH;
+		pr_err("QG: s2_acc_length is 64 now!\n");
+	}
+	//Huaqin add for HS61-1616 Update soc by wangzikang at 2019/09/26 start
 	else
 		chip->dt.s2_acc_length = temp;
 
@@ -3375,7 +3745,19 @@ static int qg_parse_dt(struct qpnp_qg *chip)
 		chip->dt.vbatt_cutoff_mv = temp;
 
 	/* IBAT thresholds */
-	rc = of_property_read_u32(node, "qcom,qg-iterm-ma", &temp);
+	/*HS60 added for HS60-5473 Optimize the charge expierience for HS60 with 4000mAh battery by wangzikang at 2020/04/07 start */
+	if (chip->batt_id_ohm_default == 47000 &&
+		((((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_ROW_ZQL1635)
+		|| (((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_PRC_ZQL1635)
+		|| (((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HQ_PCBA_LATAM_ZQL1635)))
+	{
+		temp = 350; //HS60 4000mAh
+	}
+	else
+	{
+		rc = of_property_read_u32(node, "qcom,qg-iterm-ma", &temp);
+	}
+	/*HS60 added for HS60-5473 Optimize the charge expierience for HS60 with 4000mAh battery by wangzikang at 2020/04/07 end */
 	if (rc < 0)
 		chip->dt.iterm_ma = DEFAULT_ITERM_MA;
 	else

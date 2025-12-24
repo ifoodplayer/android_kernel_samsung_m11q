@@ -120,6 +120,12 @@ enum {
 
 #define AICL_STATUS_REG				(DCDC_BASE + 0x0A)
 #define SOFT_ILIMIT_BIT				BIT(6)
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+#define USBIN_CH_COLLAPSE 			BIT(4)
+#define ICL_IMIN  					BIT(2)
+#endif
+#endif
 #define AICL_DONE_BIT				BIT(0)
 
 #define POWER_PATH_STATUS_REG			(DCDC_BASE + 0x0B)
@@ -172,6 +178,10 @@ enum {
 /********************************
  *  USBIN Peripheral Registers  *
  ********************************/
+/* HS60 add for HQ000001 While power on VBUS, start BC1.2 by gaochao at 2020/01/14 start */
+#define TYPE_C_CFG_REG 				(USBIN_BASE + 0x58)
+#define BC1P2_START_ON_CC_BIT 		BIT(7)
+/* HS60 add for HQ000001 While power on VBUS, start BC1.2 by gaochao at 2020/01/14 end */
 #define APSD_STATUS_REG				(USBIN_BASE + 0x07)
 #define APSD_STATUS_7_BIT			BIT(7)
 #define HVDCP_CHECK_TIMEOUT_BIT			BIT(6)
@@ -223,6 +233,19 @@ enum {
 #define SINGLE_DECREMENT_BIT			BIT(1)
 #define SINGLE_INCREMENT_BIT			BIT(0)
 
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+#ifdef CONFIG_ARCH_MSM8953
+#define HVDCP_PULSE_COUNT_MAX_REG              (USBIN_BASE + 0x5B)
+#define HVDCP_PULSE_COUNT_MAX_QC2_MASK         GENMASK(7, 6)
+enum {
+	HVDCP_PULSE_COUNT_MAX_QC2_5V = 0,
+	HVDCP_PULSE_COUNT_MAX_QC2_9V = 0x40,
+	HVDCP_PULSE_COUNT_MAX_QC2_12V = 0x80,
+	HVDCP_PULSE_COUNT_MAX_QC2_INVALID = 0xC0
+};
+#endif
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
+
 #define USBIN_ADAPTER_ALLOW_CFG_REG		(USBIN_BASE + 0x60)
 enum {
 	USBIN_ADAPTER_ALLOW_5V		= 0,
@@ -259,6 +282,12 @@ enum {
 #define USBIN_CURRENT_LIMIT_CFG_REG		(USBIN_BASE + 0x70)
 
 #define USBIN_AICL_OPTIONS_CFG_REG		(USBIN_BASE + 0x80)
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+#ifdef CONFIG_ARCH_MSM8953
+#define SUSPEND_ON_COLLAPSE_USBIN_BIT		BIT(7)
+#endif
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
+
 #define USBIN_AICL_ADC_EN_BIT			BIT(3)
 
 #define USBIN_5V_AICL_THRESHOLD_REG		(USBIN_BASE + 0x81)
@@ -314,7 +343,8 @@ enum {
 #define U_USB_FLOAT2_BIT			BIT(0)
 
 #define TYPE_C_MODE_CFG_REG			(TYPEC_BASE + 0x44)
-#define TYPEC_POWER_ROLE_CMD_MASK		GENMASK(2, 1)
+#define TYPEC_TRY_MODE_MASK			GENMASK(4, 3)
+#define TYPEC_POWER_ROLE_CMD_MASK		GENMASK(2, 0)
 #define EN_TRY_SNK_BIT				BIT(4)
 #define EN_SRC_ONLY_BIT				BIT(2)
 #define EN_SNK_ONLY_BIT				BIT(1)

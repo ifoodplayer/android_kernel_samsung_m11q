@@ -35,6 +35,7 @@
 #include "mdss_debug.h"
 #include "mdss_dsi_phy.h"
 #include "mdss_dba_utils.h"
+#include <linux/touchscreen_info.h>
 
 #define XO_CLK_RATE	19200000
 #define CMDLINE_DSI_CTL_NUM_STRING_LEN 2
@@ -46,7 +47,35 @@ static struct mdss_dsi_data *mdss_dsi_res;
 #define DSI_ENABLE_PC_LATENCY PM_QOS_DEFAULT_VALUE
 
 static struct pm_qos_request mdss_dsi_pm_qos_request;
-
+/*HS60 code for HS60-296 by wangqilin at 2019/08/13 start*/
+enum {
+	UNKNOWN_PANEL,
+	HLT_JD9365D_720P_VIDEO_PANEL ,
+	LS_ILI9881C_720P_VIDEO_PANEL,
+	GX_ST7703_720P_VIDEO_PANEL,
+	TXD_HX8394F_720P_VIDEO_PANEL,
+	GX_HSD_ST7703_720P_VIDEO_PANEL
+	};
+extern int mdss_mdp_parse_panel_id_kernel(void);
+#ifdef HQ_FACTORY_BUILD
+extern int test_flag;
+extern struct device_node *wdy_pan_node;
+extern int mdss_dsi_parse_dcs_cmds(struct device_node *np,
+		 struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key);
+#endif /* HQ_FACTORY_BUILD */
+/* HS70 code for HS70-133 by liufurong at 2019/10/31 start */
+/*HS50 code for SR-QL3095-01-120 by gaozhengwei at 2020/07/31 start*/
+enum tp_module_used tp_is_used = UNKNOWN_TP;
+#ifdef CONFIG_TOUCHSCREEN_ILI
+/*HS50 code for SR-QL3095-01-120 by gaozhengwei at 2020/07/31 end*/
+extern void ilitek_resume_by_ddi(void);
+extern void ili_resume_by_ddi(void);
+#endif
+#ifdef CONFIG_TOUCHSCREEN_ILI_HS50
+extern void ilitek_resume_by_ddi(void);
+#endif
+/* HS70 code for HS70-133 by liufurong at 2019/10/31 end */
+/*HS60 code for HS60-296 by wangqilin at 2019/08/13 end*/
 void mdss_dump_dsi_debug_bus(u32 bus_dump_flag,
 	u32 **dump_mem)
 {
@@ -362,12 +391,12 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev,
 
 	return rc;
 }
-
+/*HS60 code for HS60-296 by wangqilin at 2019/08/13 start*/
 static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-
+	int panel_id = UNKNOWN_PANEL;
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		ret = -EINVAL;
@@ -376,31 +405,62 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
-
-	ret = mdss_dsi_panel_reset(pdata, 0);
-	if (ret) {
-		pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
-		ret = 0;
-	}
-
-	if (gpio_is_valid(ctrl_pdata->vdd_ext_gpio)) {
-		ret = gpio_direction_output(
-			ctrl_pdata->vdd_ext_gpio, 0);
+	panel_id	= mdss_mdp_parse_panel_id_kernel();
+	if (GX_ST7703_720P_VIDEO_PANEL == panel_id || GX_HSD_ST7703_720P_VIDEO_PANEL == panel_id){
+		pr_info("%s vsp vsn off before reset\n",__func__);
+		ret = msm_mdss_enable_vreg(
+			ctrl_pdata->panel_power_data.vreg_config,
+			ctrl_pdata->panel_power_data.num_vreg, 0);
 		if (ret)
-			pr_err("%s: unable to set dir for vdd gpio\n",
+			pr_err("%s: failed to disable vregs for %s\n",
+				__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
+		ret = mdss_dsi_panel_reset(pdata, 0);
+		if (ret) {
+			pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
+			ret = 0;
+		}
+
+		if (gpio_is_valid(ctrl_pdata->vdd_ext_gpio)) {
+			ret = gpio_direction_output(
+				ctrl_pdata->vdd_ext_gpio, 0);
+			if (ret)
+				pr_err("%s: unable to set dir for vdd gpio\n",
 					__func__);
-	}
+		}
 
-	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
-		pr_debug("reset disable: pinctrl not enabled\n");
-
-	ret = msm_mdss_enable_vreg(
-		ctrl_pdata->panel_power_data.vreg_config,
-		ctrl_pdata->panel_power_data.num_vreg, 0);
-	if (ret)
-		pr_err("%s: failed to disable vregs for %s\n",
-			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
-
+		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
+			pr_debug("reset disable: pinctrl not enabled\n");
+	}else{
+		pr_info("%s vsp vsn off after reset\n",__func__);
+		ret = mdss_dsi_panel_reset(pdata, 0);
+		if (ret) {
+			pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
+			ret = 0;
+		}
+		if (gpio_is_valid(ctrl_pdata->vdd_ext_gpio)) {
+			ret = gpio_direction_output(
+				ctrl_pdata->vdd_ext_gpio, 0);
+			if (ret)
+				pr_err("%s: unable to set dir for vdd gpio\n",
+					__func__);
+		}
+		/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 start*/
+		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
+			pr_debug("reset disable: pinctrl not enabled\n");
+			/*HS60 code for HS60-232 by wangqilin at 2019/08/20 start*/
+			if(panel_id == LS_ILI9881C_720P_VIDEO_PANEL)
+				mdelay(1);
+			/*HS60 code for HS60-232 by wangqilin at 2019/08/20 start*/
+			if(ctrl_pdata->panel_data.panel_info.reset_delay_vsp_ms)
+				mdelay(ctrl_pdata->panel_data.panel_info.reset_delay_vsp_ms);
+			ret = msm_mdss_enable_vreg(
+				ctrl_pdata->panel_power_data.vreg_config,
+				ctrl_pdata->panel_power_data.num_vreg, 0);
+			if (ret)
+				pr_err("%s: failed to disable vregs for %s\n",
+					__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
+		}
+		/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 end*/
 end:
 	return ret;
 }
@@ -409,7 +469,7 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-
+	int panel_id = UNKNOWN_PANEL;
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
@@ -426,36 +486,67 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 			pr_err("%s: unable to set dir for vdd gpio\n",
 					__func__);
 	}
+	panel_id	= mdss_mdp_parse_panel_id_kernel();
+	if (GX_ST7703_720P_VIDEO_PANEL == panel_id || GX_HSD_ST7703_720P_VIDEO_PANEL == panel_id){
+		pr_info("%s vsp vsn on after reset\n",__func__);
+		/*
+		* If continuous splash screen feature is enabled, then we need to
+		* request all the GPIOs that have already been configured in the
+		* bootloader. This needs to be done irresepective of whether
+		* the lp11_init flag is set or not.
+		 */
+		if (pdata->panel_info.cont_splash_enabled ||
+			!pdata->panel_info.mipi.lp11_init) {
+			if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
+				pr_debug("reset enable: pinctrl not enabled\n");
 
-	ret = msm_mdss_enable_vreg(
-		ctrl_pdata->panel_power_data.vreg_config,
-		ctrl_pdata->panel_power_data.num_vreg, 1);
-	if (ret) {
-		pr_err("%s: failed to enable vregs for %s\n",
-			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
-		return ret;
-	}
+			ret = mdss_dsi_panel_reset(pdata, 1);
+			if (ret)
+				pr_err("%s: Panel reset failed. rc=%d\n",
+						__func__, ret);
+		}
+		ret = msm_mdss_enable_vreg(
+			ctrl_pdata->panel_power_data.vreg_config,
+			ctrl_pdata->panel_power_data.num_vreg, 1);
+		if (ret) {
+			pr_err("%s: failed to enable vregs for %s\n",
+				__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
+			return ret;
+		}
+	}else{
+			pr_info("%s vsp vsn on before reset\n",__func__);
+			ret = msm_mdss_enable_vreg(
+			ctrl_pdata->panel_power_data.vreg_config,
+			ctrl_pdata->panel_power_data.num_vreg, 1);
+		if (ret) {
+			pr_err("%s: failed to enable vregs for %s\n",
+				__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
+			return ret;
+		}
 
-	/*
-	 * If continuous splash screen feature is enabled, then we need to
-	 * request all the GPIOs that have already been configured in the
-	 * bootloader. This needs to be done irresepective of whether
-	 * the lp11_init flag is set or not.
-	 */
-	if (pdata->panel_info.cont_splash_enabled ||
-		!pdata->panel_info.mipi.lp11_init) {
-		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
-			pr_debug("reset enable: pinctrl not enabled\n");
+		/*
+		* If continuous splash screen feature is enabled, then we need to
+		* request all the GPIOs that have already been configured in the
+		* bootloader. This needs to be done irresepective of whether
+		* the lp11_init flag is set or not.
+		*/
+		if (pdata->panel_info.cont_splash_enabled ||
+			!pdata->panel_info.mipi.lp11_init) {
+			if (mdss_dsi_pinctrl_set_state(ctrl_pdata, true))
+				pr_debug("reset enable: pinctrl not enabled\n");
 
-		ret = mdss_dsi_panel_reset(pdata, 1);
-		if (ret)
-			pr_err("%s: Panel reset failed. rc=%d\n",
+			ret = mdss_dsi_panel_reset(pdata, 1);
+			if (ret)
+				pr_err("%s: Panel reset failed. rc=%d\n",
 					__func__, ret);
+		}
 	}
+
+
 
 	return ret;
 }
-
+/*HS60 code for HS60-296 by wangqilin at 2019/08/13 end*/
 static int mdss_dsi_panel_power_lp(struct mdss_panel_data *pdata, int enable)
 {
 	/* Panel power control when entering/exiting lp mode */
@@ -1596,7 +1687,22 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 			pr_debug("reset enable: pinctrl not enabled\n");
 		mdss_dsi_panel_reset(pdata, 1);
 	}
-
+	/* HS70 code for HS70-133 by liufurong at 2019/10/31 start */
+	/*HS50 code for SR-QL3095-01-120 by gaozhengwei at 2020/07/31 start*/
+	#if (defined CONFIG_TOUCHSCREEN_ILI)
+	/*HS50 code for SR-QL3095-01-120 by gaozhengwei at 2020/07/31 end*/
+	if (tp_is_used == ILITEK_ILI7807G) {
+		ilitek_resume_by_ddi();
+	} else if(tp_is_used == ILITEK_ILI7806S){
+		ili_resume_by_ddi();
+	}
+	#endif
+	#ifdef CONFIG_TOUCHSCREEN_ILI_HS50
+	if (tp_is_used == ILITEK_ILI7807G) {
+		ilitek_resume_by_ddi();
+	}
+	#endif
+	/* HS70 code for HS70-133 by liufurong at 2019/10/31 end */
 	if (mipi->init_delay)
 		usleep_range(mipi->init_delay, mipi->init_delay + 10);
 
@@ -1681,6 +1787,55 @@ static int mdss_dsi_pinctrl_init(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef HQ_FACTORY_BUILD
+static int mdss_reload_initcode(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	pr_err("[LCD sorting] ctrl_pdata is %p\n",ctrl_pdata);
+	pr_err("[LCD sorting] test_flag is %d\n",test_flag);
+	pr_err("[LCD sorting] node is %p\n",wdy_pan_node);
+	if (ctrl_pdata->panel_data.panel_info.reload_flag) {
+		pr_err("[LCD sorting] get true panel\n");
+		if (wdy_pan_node) {
+			switch (test_flag)
+			{
+			case 0:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+			case 1:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command1",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+			case 2:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command2",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+			case 3:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command3",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+			case 4:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command4",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+
+			default:
+				mdss_dsi_parse_dcs_cmds(wdy_pan_node, &ctrl_pdata->on_cmds,
+					"qcom,mdss-dsi-on-command",
+					"qcom,mdss-dsi-on-command-state");
+				break;
+			}
+		}
+    }
+	return 0;
+}
+#endif /* HQ_FACTORY_BUILD */
+
 static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -1695,6 +1850,9 @@ static int mdss_dsi_unblank(struct mdss_panel_data *pdata)
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
+#ifdef HQ_FACTORY_BUILD
+	ret = mdss_reload_initcode(ctrl_pdata);
+#endif /* HQ_FACTORY_BUILD */
 	mipi  = &pdata->panel_info.mipi;
 
 	pr_debug("%s+: ctrl=%pK ndx=%d cur_power_state=%d ctrl_state=%x\n",

@@ -16,7 +16,9 @@
  */
 
 #if defined(CONFIG_SERIAL_MSM_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
-# define SUPPORT_SYSRQ
+/* huaqin modify by yanghui for HS50-2381 at 20201023 start */
+# define SUPPORT_SYSRQ 0
+/* huaqin modify by yanghui for HS50-2381 at 20201023 end */
 #endif
 
 #include <linux/kernel.h>

@@ -57,6 +57,76 @@ struct gpio_keys_drvdata {
 	struct gpio_button_data data[0];
 };
 
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+struct device *sec_key;
+EXPORT_SYMBOL(sec_key);
+
+#include <linux/sec_class.h>
+
+extern int get_pkey_press(void);
+extern int get_vdkey_press(void);
+
+static ssize_t keycode_pressed_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
+	int index;
+	int state, keycode;
+	char *buff;
+	char tmp[7] = {0};
+	ssize_t count;
+	int len = (ddata->pdata->nbuttons + 2) * 7 + 2;
+
+	buff = kmalloc(len, GFP_KERNEL);
+	if (!buff) {
+		pr_err("%s %s: failed to mem alloc\n", SECLOG, __func__);
+		return snprintf(buf, 5, "NG\n");
+	}
+
+	for (index = 0; index < ddata->pdata->nbuttons; index++) {
+		struct gpio_button_data *button;
+
+		button = &ddata->data[index];
+		state = (__gpio_get_value(button->button->gpio) ? 1 : 0)
+			^ button->button->active_low;
+		keycode = button->button->code;
+		if (index == 0) {
+			snprintf(buff, 7, "%d:%d", keycode, state);
+		} else {
+			snprintf(tmp, 7, ",%d:%d", keycode, state);
+			strncat(buff, tmp, 7);
+		}
+	}
+
+	state = get_pkey_press();
+	keycode = KEY_POWER;
+	snprintf(tmp, 7, ",%d:%d", keycode, state);
+	strncat(buff, tmp, 7);
+
+	state = get_vdkey_press();
+	keycode = KEY_VOLUMEDOWN;
+	snprintf(tmp, 7, ",%d:%d", keycode, state);
+	strncat(buff, tmp, 7);
+
+	pr_info("%s %s: %s\n", SECLOG, __func__, buff);
+	count = snprintf(buf, strnlen(buff, len - 2) + 2, "%s\n", buff);
+
+	kfree(buff);
+
+	return count;
+}
+static DEVICE_ATTR(keycode_pressed, 0444, keycode_pressed_show, NULL);
+
+static struct attribute *sec_key_attrs[] = {
+	&dev_attr_keycode_pressed.attr,
+	NULL,
+};
+
+static struct attribute_group sec_key_attr_group = {
+	.attrs = sec_key_attrs,
+};
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
+
 /*
  * SYSFS interface for enabling/disabling keys and switches:
  *
@@ -810,6 +880,19 @@ static int gpio_keys_probe(struct platform_device *pdev)
 			error);
 		goto err_remove_group;
 	}
+
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+	sec_key = sec_device_create(13, NULL, "sec_key");
+	if (IS_ERR(sec_key))
+		pr_err("Failed to create device(sec_key)!\n");
+
+	error = sysfs_create_group(&sec_key->kobj, &sec_key_attr_group);
+	if (error) {
+		dev_err(dev, "Unable to create sysfs_group, error: %d\n",
+			error);
+	}
+	dev_set_drvdata(sec_key, ddata);
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
 
 	device_init_wakeup(&pdev->dev, wakeup);
 

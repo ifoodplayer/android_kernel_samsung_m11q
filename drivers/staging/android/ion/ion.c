@@ -585,6 +585,13 @@ static struct ion_handle *__ion_alloc(
 	if (!len)
 		return ERR_PTR(-EINVAL);
 
+	if (heap_id_mask == 0xFFFFFFFF) {
+		heap_id_mask = get_ion_system_heap_id();
+		if (IS_ERR(ERR_PTR(heap_id_mask)))
+			return ERR_PTR(heap_id_mask);
+		heap_id_mask = (1 << heap_id_mask);
+	}
+
 	down_read(&dev->lock);
 	plist_for_each_entry(heap, &dev->heaps, node) {
 		/* if the caller didn't specify this heap id */
@@ -668,7 +675,15 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 			     size_t align, unsigned int heap_id_mask,
 			     unsigned int flags)
 {
-	return __ion_alloc(client, len, align, heap_id_mask, flags, false);
+	struct ion_handle *handle;
+
+	handle = __ion_alloc(client, len, align, heap_id_mask, flags, false);
+	if (IS_ERR(handle)) {
+		pr_err("%s: len %zu align %zu heap_id_mask %#x flags %x ret %ld\n",
+		       __func__, len, align, heap_id_mask, flags,
+		       PTR_ERR(handle));
+	}
+	return handle;
 }
 EXPORT_SYMBOL(ion_alloc);
 
@@ -1957,6 +1972,20 @@ static const struct file_operations debug_heap_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };
+
+void show_ion_system_heap_pool_size(struct ion_device *dev, struct seq_file *s)
+{
+	if (!down_read_trylock(&dev->lock)) {
+		if (s)
+			seq_printf(s, "SystemHeapPool: NA\n");
+		else
+			pr_cont("SystemHeapPool:NA ");
+		return;
+	}
+
+	show_ion_system_heap_pool_size_locked(s);
+	up_read(&dev->lock);
+}
 
 void show_ion_usage(struct ion_device *dev)
 {

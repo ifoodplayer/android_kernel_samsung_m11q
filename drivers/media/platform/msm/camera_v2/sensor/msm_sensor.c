@@ -21,10 +21,91 @@
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
-
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29start*/
+#include <kernel_project_defines.h>
+#ifdef CONFIG_MSM_CAMERA_HS60_ADDBOARD
+#include <soc/qcom/smem.h>
+u32 sku_version_hq = 0;
+#endif
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29 end*/
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 start*/
+#ifdef HUAQIN_KERNEL_PROJECT_HS50
+#include <soc/qcom/smem.h>
+u32 hs50_board_id = 0;
+#endif
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 end*/
+/* HS60 code for HS60-263 by xuxianwei at 20190729 start */
+uint16_t gc5035_module_flag = 0;
+uint16_t gc5035_module_id = 0;
+uint16_t gc5035_supply_id = 0;
+uint16_t gc02m1_supply_id = 0;
+/* HS60 code for HS60-263 by xuxianwei at 20190729 end */
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 start*/
+#include <linux/gpio.h>
+#define  SENSOR_SUB_GPIO_ID          41//add gpio_id
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 end*/
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 start*/
+#define  SENSOR_SUB_GPIO_ID_HS70          1//add gpio_id
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 end*/
+/*HS70 code for HS70 xxx by gaozhenyu at 2020/08/22 start*/
+#define  SENSOR_SUB_GPIO_ID_HS50          1//add camera_id gpio
+/*HS70 code for HS70 xxx by gaozhenyu at 2020/08/22 end*/
 static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl;
 static struct msm_camera_i2c_fn_t msm_sensor_secure_func_tbl;
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29start*/
+#ifdef CONFIG_MSM_CAMERA_HS60_ADDBOARD
+static int swtp_sku_conf(void)
+{
+	u32 *sku_addr = NULL;
+	u32 sku_size = 0;
 
+	sku_addr = (u32 *)smem_get_entry(SMEM_ID_VENDOR1, &sku_size, 0, 0);
+	if (sku_addr)
+	{
+		sku_version_hq = (*sku_addr)&0xf;
+		pr_err("%s sku_size=%d, sku_version=0x%x\n",__FUNCTION__, sku_size, sku_version_hq);
+		return 0;
+	}
+	else
+	{
+		pr_err("%s reading the smem conf fail\n", __FUNCTION__);
+		return 1;
+	}
+}
+#endif
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29end*/
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 start*/
+#ifdef HUAQIN_KERNEL_PROJECT_HS50
+static u32 read_hs50_id(void)
+{
+	u32 *hs50_id_addr = NULL;
+	u32 hs50_id_size = 0;
+	u32 id=0;
+
+	hs50_id_addr = (u32 *)smem_get_entry(SMEM_ID_VENDOR1, &hs50_id_size, 0, 0);
+	if (hs50_id_addr)
+	{
+		id = (*hs50_id_addr);
+		if(id==0)
+		{
+			pr_err("%s reading board_id from smem conf fail,id error\n", __FUNCTION__);
+			return 0;
+		}
+		else
+		{
+			pr_err("%s size=%d, board_id=0x%x, id&0xf0=0x%x\n",__FUNCTION__, hs50_id_size, id, id&0xf0);
+			return id&0xf0;
+		}
+	}
+	else
+	{
+		pr_err("%s reading board_id from smem conf fail\n", __FUNCTION__);
+		return 0;
+	}
+
+}
+#endif
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 end*/
 static void msm_sensor_adjust_mclk(struct msm_camera_power_ctrl_t *ctrl)
 {
 	int idx;
@@ -142,6 +223,21 @@ int msm_sensor_power_down(struct msm_sensor_ctrl_t *s_ctrl)
 		return -EINVAL;
 	}
 
+    /*HS70 code for gc02m1 power leak by zhangpeng at 2020/03/24 start*/
+    if ((strcmp(s_ctrl->sensordata->sensor_name, "gc02m1") == 0) ||
+      (strcmp(s_ctrl->sensordata->sensor_name, "gc02m1_hs70_xl") == 0) ||
+      (strcmp(s_ctrl->sensordata->sensor_name, "gc02m1_hs70_jk") == 0) ||
+	  (strcmp(s_ctrl->sensordata->sensor_name, "gc02m1_hs70_mcn") == 0)) {
+        pr_err("%s gc02m1 power down write settings for power leak start", __func__);
+        sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf9,0x82, MSM_CAMERA_I2C_BYTE_DATA);
+        sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf7,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+        sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8e, MSM_CAMERA_I2C_BYTE_DATA);
+        sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf7,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+        sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf9,0x83, MSM_CAMERA_I2C_BYTE_DATA);
+        pr_err("%s gc02m1 power down write settings for power leak end", __func__);
+    }
+    /*HS70 code for gc02m1 power leak by zhangpeng at 2020/03/24 end*/
+
 	/* Power down secure session if it exist*/
 	if (s_ctrl->is_secure)
 		msm_camera_tz_i2c_power_down(sensor_i2c_client);
@@ -208,8 +304,22 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 #if IS_ENABLED(CONFIG_ARCH_QM215)
 		msleep(60);
 #endif
-		rc = msm_camera_power_up(power_info, s_ctrl->sensor_device_type,
-			sensor_i2c_client);
+          	/*HS60 code for HS60-1598 by zhangpeng at 2019/09/16 start*/
+          	/*HS70 code for HS70-57 by zhangpeng at 2019/09/30 start*/
+		/*HS70 code for HS70-55 by chengzhi at 2019/09/30 start*/
+		if((0 == strcmp(sensor_name, "gc2375h")) ||
+		    (0 == strcmp(sensor_name, "gc2375h_kg")) ||
+		    (0 == strcmp(sensor_name, "gc2375h_cxt")) ||
+		    (0 == strcmp(sensor_name, "gc2375h_hs70_jk"))) {
+		/*HS70 code for HS70-55 by chengzhi at 2019/09/30 end*/
+		    /*HS70 code for HS70-57 by zhangpeng at 2019/09/30 end*/
+		    rc = msm_gc2375h_power_up(power_info, s_ctrl->sensor_device_type,
+			    sensor_i2c_client);
+		}
+		else {
+		    rc = msm_camera_power_up(power_info, s_ctrl->sensor_device_type,
+			    sensor_i2c_client);
+		}
 		if (rc < 0)
 			return rc;
 		rc = msm_sensor_check_id(s_ctrl);
@@ -221,6 +331,7 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 		} else {
 			break;
 		}
+          	/*HS60 code for HS60-1598 by zhangpeng at 2019/09/16 end*/
 	}
 
 	return rc;
@@ -252,7 +363,37 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	struct msm_camera_i2c_client *sensor_i2c_client;
 	struct msm_camera_slave_info *slave_info;
 	const char *sensor_name;
-
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 start*/
+	uint16_t msm_2m_id = 0;
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 end*/
+/*HS70 code for HS70 xxx by xiayu at 2019/11/13 start*/
+	uint16_t gc8034_supply_id = 0;
+	uint16_t hi1336_supply_id = 0;
+	static enum msm_camera_i2c_reg_addr_type gc8034_type;
+	static enum msm_camera_i2c_reg_addr_type hi1336_type;
+/*HS70 code for HS70 xxx by xiayu at 2019/11/13 end*/
+/*HS70 code for HS70 1111 by xiayu at 2020/03/06 start*/
+	static uint16_t s5k3l6_supply_id = 0;
+	static enum msm_camera_i2c_reg_addr_type s5k3l6_type;
+/*HS70 code for HS70 1111 by xiayu at 2020/03/06 end*/
+/*HS70 code for HS70 1111 by xiayu at 2020/01/21 start*/
+	uint16_t s5k4h7_supply_id = 0;
+	static enum msm_camera_i2c_reg_addr_type s5k4h7_type;
+/*HS70 code for HS70 1111 by xiayu at 2020/01/21 end*/
+/* HS60 code for HS60-855&HS60-856 by chengzhi at 20190822 start */
+	static uint16_t hi556_module_flag = 0;
+	static uint16_t hi556_module_id = 0;
+	static uint16_t hi556_supply_id = 0;
+	uint16_t ov13b10_supply_id = 0;
+/* HS60 code for HS60-855&HS60-856 by chengzhi at 20190822 end */
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 start*/
+	uint16_t msm_2m_id_hs70 = 0;
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 end*/
+/*HS70 code for HS70-515 by xionggengen at 2019/11/13 start*/
+	static uint16_t bakeup_i2c_addr;
+	static enum msm_camera_i2c_reg_addr_type vendor_addr_type;
+	int bakeup_rc = 0;
+/*HS70 code for HS70-515 by xionggengen at 2019/11/13 end*/
 	if (!s_ctrl) {
 		pr_err("%s:%d failed: %pK\n",
 			__func__, __LINE__, s_ctrl);
@@ -261,7 +402,6 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	sensor_i2c_client = s_ctrl->sensor_i2c_client;
 	slave_info = s_ctrl->sensordata->slave_info;
 	sensor_name = s_ctrl->sensordata->sensor_name;
-
 	if (adsp_shmem_is_initialized()) {
 		pr_debug("%s aDSP camera supports sensor_name:%s\n", __func__,
 			adsp_shmem_get_sensor_name());
@@ -306,6 +446,554 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 				__func__, chipid, slave_info->sensor_id);
 		return -ENODEV;
 	}
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 start*/
+    	if(0 == strcmp(sensor_name, "gc2375h")||0 == strcmp(sensor_name, "gc2375h_kg")){
+          if(gpio_is_valid(SENSOR_SUB_GPIO_ID)){
+                  gpio_direction_input(SENSOR_SUB_GPIO_ID);
+                  msm_2m_id = gpio_get_value(SENSOR_SUB_GPIO_ID);
+          }
+          pr_err("gc2375 msm_2m_id is %d %s", msm_2m_id, sensor_name);
+          if((0==strcmp(sensor_name, "gc2375h"))&&(msm_2m_id !=0)){
+                  return -ENODEV;
+          }else if ((0 == strcmp(sensor_name, "gc2375h_kg"))&&(msm_2m_id !=1)){
+                  return -ENODEV;
+          }
+    	}
+/*HS60 code for HS60-368 by xuxianwei at 2019/08/08 end*/
+/*HS70 code for HS70-515 by xionggengen at 2019/11/13 start*/
+/*HS70 code for HS70-000102 by sunmao at 2020/01/02 start*/
+	if(0 == strcmp(sensor_name, "gc5035_hs70_ts")
+	   || 0 == strcmp(sensor_name, "gc5035_hs70_ly")
+       || 0 == strcmp(sensor_name, "gc5035_hs70_jk")
+	   || 0 == strcmp(sensor_name, "gc5035_hs70_par")
+	   || 0 == strcmp(sensor_name, "gc5035_hs70_mcn")
+	   || 0 == strcmp(sensor_name, "gc5035_hs70_cxt")) {
+		    if(0 == strcmp(sensor_name, "gc5035_hs70_ts")){
+				bakeup_i2c_addr = sensor_i2c_client->cci_client->sid;
+				vendor_addr_type = sensor_i2c_client->addr_type;
+				sensor_i2c_client->addr_type = 2;
+				sensor_i2c_client->cci_client->sid = 0x52;
+			bakeup_rc = sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0001,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+			if (bakeup_rc >= 0) {
+				sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0002,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->cci_client->sid = bakeup_i2c_addr;
+				sensor_i2c_client->addr_type = vendor_addr_type;
+				if(gc5035_supply_id !=0x56)
+					return -ENODEV;
+			} else {
+				sensor_i2c_client->cci_client->sid = bakeup_i2c_addr;
+				sensor_i2c_client->addr_type = vendor_addr_type;
+				return -ENODEV;
+				}
+			}
+/*HS70 code for HS70 xxxxxx by xiayu at 2020/01/20 start*/
+/*HS70 code for HS70 by xiayu at 2020/05/12 start*/
+		    if(0 == strcmp(sensor_name, "gc5035_hs70_par")||0 == strcmp(sensor_name, "gc5035_hs70_mcn")){
+				bakeup_i2c_addr = sensor_i2c_client->cci_client->sid;
+				vendor_addr_type = sensor_i2c_client->addr_type;
+				sensor_i2c_client->addr_type = 2;
+				sensor_i2c_client->cci_client->sid = 0xA6 >> 1;
+			bakeup_rc = sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0730,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+			if (bakeup_rc >= 0) {
+				//sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0730,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->cci_client->sid = bakeup_i2c_addr;
+				sensor_i2c_client->addr_type = vendor_addr_type;
+			if((0 == strcmp(sensor_name, "gc5035_hs70_par"))&&(gc5035_supply_id != 0x5A)){
+					return -ENODEV;
+			}
+			if((0 == strcmp(sensor_name, "gc5035_hs70_mcn"))&&(gc5035_supply_id != 0x31)){
+					return -ENODEV;
+			}
+			}
+			else {
+				sensor_i2c_client->cci_client->sid = bakeup_i2c_addr;
+				sensor_i2c_client->addr_type = vendor_addr_type;
+				return -ENODEV;
+			}
+		}
+/*HS70 code for HS70 by xiayu at 2020/05/12 end*/
+/*HS70 code for HS70 xxxxxx by xiayu at 2020/01/20 end*/
+		 else {
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf4,0x40, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf5,0xe9, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf6,0x14, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf8,0x49, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf9,0x82, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfa,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x81, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xd3,0x87, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf7,0x01,MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f,MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8e, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x02, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x55,0x80, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x65,0x7e, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x66,0x03, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xc0, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x68,0x11, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xe0,0x1f, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xf0, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+				sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd3,&gc5035_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+				if((gc5035_module_flag&0xc) == 0x4){
+					sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd4,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+					sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd5,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+				}
+				else if((gc5035_module_flag&0x3) == 0x1){
+					 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xda,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+					 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xdb,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+				}
+				pr_err("gc503570 read eeprom is 0x%x 0x%x", gc5035_supply_id,gc5035_module_id);
+				if(0==strcmp(sensor_name, "gc5035_hs70_cxt")){
+					if(gc5035_supply_id !=0x54)
+						return -ENODEV;
+				}
+				if(0==strcmp(sensor_name, "gc5035_hs70_jk")){
+				//	if(gc5035_module_id != 0x08)
+				//		return -ENODEV;
+				}
+				if(0==strcmp(sensor_name, "gc5035_hs70_ly")){
+					if(gc5035_supply_id !=0x57)
+						return -ENODEV;
+				}
+			}
+	}
+/*HS70 code for HS70-000102 by sunmao at 2020/01/02 end*/
+/*HS70 code for HS70-515 by xionggengen at 2019/11/13 end*/
+/* HS70 code for HS70-4224 by xiayu at 2020/01/20 start */
+if(0 == strcmp(sensor_name, "s5k4h7_hs70_txd")
+	||0 == strcmp(sensor_name, "s5k4h7_hs70_par")
+	||0 == strcmp(sensor_name, "s5k4h7_hs70_sy")){
+		s5k4h7_type=sensor_i2c_client->addr_type;
+		sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0x0730,&s5k4h7_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+		sensor_i2c_client->addr_type=s5k4h7_type;
+		pr_err("s5k4h7 read eeprom is 0x%x", s5k4h7_supply_id);
+/* HS70 code for HS70-4224 by xiayu at 2020/02/13 start */
+/* HS70 code for HS70-4632 by xiayu at 2020/03/11 start */
+	if((0==strcmp(sensor_name, "s5k4h7_hs70_txd"))&&(((s5k4h7_supply_id ==0x5A))||((s5k4h7_supply_id ==0x32))))
+	{
+		return -ENODEV;
+	}
+/* HS70 code for HS70-4224 by xiayu at 2020/02/13 end */
+	if(0==strcmp(sensor_name, "s5k4h7_hs70_par")){
+		if((s5k4h7_supply_id !=0x5A))
+			return -ENODEV;
+	}
+	if(0==strcmp(sensor_name, "s5k4h7_hs70_sy")){
+		if((s5k4h7_supply_id !=0x32))
+			return -ENODEV;
+	}
+/* HS70 code for HS70-4632 by xiayu at 2020/03/11 end */
+}
+/* HS70 code for HS70-4224 by xiayu at 2020/01/20 end */
+/* HS60 code for HS60-263 by xuxianwei at 20190729 start */
+	if(0 == strcmp(sensor_name, "gc5035")||0 == strcmp(sensor_name, "gc5035_ly")){
+	pr_err("gc5035 read eeprom enter %s", sensor_name);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf4,0x40, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf5,0xe9, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf6,0x14, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf8,0x49, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf9,0x82, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfa,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x81, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xd3,0x87, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf7,0x01,MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f,MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8e, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x02, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x55,0x80, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x65,0x7e, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x66,0x03, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xc0, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x68,0x11, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xe0,0x1f, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xf0, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd3,&gc5035_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+	pr_err("gc5035 read   gc5035_module_flag%x", gc5035_module_flag);
+/* HS60 code for HS60-263 by xuxianwei at 20190923 start */
+	if((gc5035_module_flag&0xc) == 0x4){
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd4,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd5,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+	else if((gc5035_module_flag&0x3) == 0x1){
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xda,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xdb,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+	pr_err("gc5035 read eeprom is 0x%x 0x%x", gc5035_supply_id,gc5035_module_id);
+	if(0==strcmp(sensor_name, "gc5035")){
+		if((gc5035_supply_id !=0x55)&&(gc5035_module_id !=0x41)){
+			return -ENODEV;
+		}
+	}
+	if(0==strcmp(sensor_name, "gc5035_ly")){
+		if((gc5035_supply_id !=0x57)&&(gc5035_module_id !=0x61)){
+			return -ENODEV;
+		}
+	}
+	}
+/* HS60 code for HS60-263 by xuxianwei at 20190923 end */
+/* HS60 code for HS60-263 by xuxianwei at 20190729 end */
+/* HS70 code for HS70 4632 by xiayu at 2020/03/06 start */
+if(0 == strcmp(sensor_name, "s5k3l6_hs70_jk")||0 == strcmp(sensor_name, "s5k3l6_hs70_xl")||0 == strcmp(sensor_name,"s5k3l6_hs70_cam")||0 == strcmp(sensor_name, "s5k3l6_hs70_qt")){
+	s5k3l6_type=sensor_i2c_client->addr_type;
+	sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+	if(0==strcmp(sensor_name, "s5k3l6_hs70_qt")){
+	sensor_i2c_client->cci_client->sid=0xA2 >> 1;
+	}else
+	{
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+	}
+	sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&s5k3l6_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+	sensor_i2c_client->addr_type=s5k3l6_type;
+	if((0==strcmp(sensor_name, "s5k3l6_hs70_jk"))&&(s5k3l6_supply_id !=0x08)){
+            return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "s5k3l6_hs70_xl"))&&(s5k3l6_supply_id !=0x02)){
+            return -ENODEV;
+		}else if ((0 == strcmp(sensor_name, "s5k3l6_hs70_cam"))&&(s5k3l6_supply_id !=0x5B)){
+			return -ENODEV;
+		}else if ((0 == strcmp(sensor_name, "s5k3l6_hs70_qt"))&&(s5k3l6_supply_id !=0x06)){
+			return -ENODEV;
+		}
+    pr_err("s5k3l6 supply_id is %d %s,sensor_slave_addr=%x", s5k3l6_supply_id, sensor_name,slave_info->sensor_slave_addr);
+}
+/* HS70 code for HS70 4632 by xiayu at 2020/03/06 end */
+/*HS70 code for HS70 xxx by xiayu at 2019/11/13 start*/
+if(0 == strcmp(sensor_name, "gc8034_hs70_ly")||0 == strcmp(sensor_name, "gc8034_hs70_jk")){
+		gc8034_type=sensor_i2c_client->addr_type;
+		sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&gc8034_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+		sensor_i2c_client->addr_type=gc8034_type;
+		if((0==strcmp(sensor_name, "gc8034_hs70_ly"))&&(gc8034_supply_id !=0x57)){
+              return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "gc8034_hs70_jk"))&&(gc8034_supply_id !=0x08)){
+             return -ENODEV;
+    }
+          pr_err("gc8034 supply_id is %d %s,sensor_slave_addr=%x", gc8034_supply_id, sensor_name,slave_info->sensor_slave_addr);
+}
+/*HS70 code for HS70 xxx by gaozhenyu at 2020/01/17 start*/
+if(0 == strcmp(sensor_name, "hi1336_hs70_hlt")||0 == strcmp(sensor_name, "hi1336_hs70_ts")||0 == strcmp(sensor_name, "hi1336_hs70_xl")){
+		hi1336_type=sensor_i2c_client->addr_type;
+		sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&hi1336_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+		sensor_i2c_client->addr_type=hi1336_type;
+		if((0==strcmp(sensor_name, "hi1336_hs70_hlt"))&&(hi1336_supply_id !=0x55)){
+              return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "hi1336_hs70_ts"))&&(hi1336_supply_id !=0x56)){
+             return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "hi1336_hs70_xl"))&&(hi1336_supply_id !=0x02)){
+             return -ENODEV;
+        }
+        pr_err("hi1336 supply_id is %d %s,sensor_slave_addr=%x", hi1336_supply_id, sensor_name,slave_info->sensor_slave_addr);
+}
+/*HS70 code for HS70 xxx by gaozhenyu at 2020/01/17 end*/
+/*HS70 code for HS70 xxx by xiayu at 2019/11/13 end*/
+/* HS60 code for HS60-855&HS60-856 by chengzhi at 20190822 start */
+/*HS60 code for HS60-5254  by huangjiwu at 2019/02/25 start*/
+	if(0 == strcmp(sensor_name, "ov13b10")||0 == strcmp(sensor_name, "ov13b10_qt") || 0 == strcmp(sensor_name, "ov13b10_change")){
+		uint16_t ov13b10_module_id = 0;
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&ov13b10_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0x0002,&ov13b10_module_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+		if((0==strcmp(sensor_name, "ov13b10") || 0==strcmp(sensor_name, "ov13b10_change"))&&(ov13b10_supply_id !=0x58)){
+                  return -ENODEV;
+          	}else if ((0 == strcmp(sensor_name, "ov13b10_qt"))&&(ov13b10_supply_id !=0x06)){
+                  return -ENODEV;
+          	}
+          pr_err("ov13b10 supply_id is %d %s,sensor_slave_addr=%x", ov13b10_supply_id, sensor_name,slave_info->sensor_slave_addr);
+		if((0==strcmp(sensor_name, "ov13b10")) && (ov13b10_module_id != 0x31)) {
+			return -ENODEV;
+		} else if((0==strcmp(sensor_name, "ov13b10_change")) && (ov13b10_module_id != 0xc1)) {
+			return -ENODEV;
+		}
+/*HS60 code for HS60-5254  by huangjiwu at 2019/02/25 end*/
+    	}
+    	if(0 == strcmp(sensor_name, "hi556")||0 == strcmp(sensor_name, "hi556_txd")){
+		if(hi556_module_flag == 0x0){
+			pr_err("hi556 read eeprom enter %s", sensor_name);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0e00,0x0102, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0e02,0x0102, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0e0c,0x0100, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x27fe,0xe000, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0b0e,0x8600, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0d04,0x0100, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0d02,0x0707, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0f30,0x6e25, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0f32,0x7067, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0f02,0x0106, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a04,0x0000, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0e0a,0x0001,MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x004a,0x0100,MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x003e,0x1000, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a00,0x0100, MSM_CAMERA_I2C_WORD_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a02,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a00,0x0,  MSM_CAMERA_I2C_BYTE_DATA);
+			msleep(10);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0f02,0x0,  MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x011a,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x011b,0x09, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0d04,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0d02,0x07, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x003e,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a00,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010a,0x04, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010b,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0102,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+			if(hi556_module_flag == 0x01){
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010a,0x04, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010b,0x02, MSM_CAMERA_I2C_BYTE_DATA);
+	        	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0102,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+			}
+			else if(hi556_module_flag == 0x13){
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010a,0x04, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010b,0x13, MSM_CAMERA_I2C_BYTE_DATA);
+	        	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0102,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+			}
+			else if(hi556_module_flag == 0x37){
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010a,0x04, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x010b,0x24, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0102,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x0108,&hi556_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+			}
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a00,0x0, MSM_CAMERA_I2C_BYTE_DATA);
+			msleep(10);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x004a,0x0, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0d04,0x0, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x003e,0x0, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x004a,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+			sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x0a00,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+		}
+		if(0==strcmp(sensor_name, "hi556")){
+			if((hi556_supply_id !=0x08)&&(hi556_module_id !=0x51)){
+				pr_err("hi556 return is 0x%x 0x%x", hi556_supply_id,hi556_module_id);
+				return -ENODEV;
+			}
+		}
+		else if(0==strcmp(sensor_name, "hi556_txd")){
+			if((hi556_supply_id !=0x58)&&(hi556_module_id !=0x81)){
+				pr_err("hi556 return is 0x%x 0x%x", hi556_supply_id,hi556_module_id);
+				return -ENODEV;
+			}
+		}
+		pr_err("hi556 read eeprom is 0x%x 0x%x", hi556_supply_id,hi556_module_id);
+    	}
+/* HS60 code for HS60-855&HS60-856 by chengzhi at 20190822 end */
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 start*/
+    if(0 == strcmp(sensor_name, "gc2375h_hs70_jk")||0 == strcmp(sensor_name, "gc2375h_cxt")){
+        if(gpio_is_valid(SENSOR_SUB_GPIO_ID_HS70)){
+		gpio_direction_input(SENSOR_SUB_GPIO_ID_HS70);
+                msm_2m_id_hs70 = gpio_get_value(SENSOR_SUB_GPIO_ID_HS70);
+        }
+        pr_err("gc2375 msm_2m_id_hs70 is %d %s", msm_2m_id_hs70, sensor_name);
+        if((0==strcmp(sensor_name, "gc2375h_cxt"))&&(msm_2m_id_hs70 !=0)){
+            return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "gc2375h_hs70_jk"))&&(msm_2m_id_hs70 !=1)){
+            return -ENODEV;
+        }
+    }
+	if(0 == strcmp(sensor_name, "gc02m1_hs70_xl")||0 == strcmp(sensor_name, "gc02m1_hs70_mcn")){
+        if(gpio_is_valid(SENSOR_SUB_GPIO_ID_HS70)){
+		gpio_direction_input(SENSOR_SUB_GPIO_ID_HS70);
+                msm_2m_id_hs70 = gpio_get_value(SENSOR_SUB_GPIO_ID_HS70);
+        }
+        pr_err("gc02m1 msm_2m_id_hs70 is %d %s", msm_2m_id_hs70, sensor_name);
+        if((0==strcmp(sensor_name, "gc02m1_hs70_mcn"))&&(msm_2m_id_hs70 !=1)){
+            return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "gc02m1_hs70_xl"))&&(msm_2m_id_hs70 !=0)){
+            return -ENODEV;
+        }
+    }
+/*HS70 code for HS70 xxx by chengzhi at 2019/09/30 end*/
+/*HS70 code for HS70 xxx by sunmao at 2020/04/15 start*/
+    if(0 == strcmp(sensor_name, "gc02m1")||0 == strcmp(sensor_name, "gc02m1_hs70_jk")){
+        if(gpio_is_valid(SENSOR_SUB_GPIO_ID_HS70)){
+		gpio_direction_input(SENSOR_SUB_GPIO_ID_HS70);
+                msm_2m_id_hs70 = gpio_get_value(SENSOR_SUB_GPIO_ID_HS70);
+        }
+        pr_err("gc02m1 msm_2m_id_hs70 is %d %s", msm_2m_id_hs70, sensor_name);
+        if((0==strcmp(sensor_name, "gc02m1"))&&(msm_2m_id_hs70 !=1)){
+            return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "gc02m1_hs70_jk"))&&(msm_2m_id_hs70 !=0)){
+            return -ENODEV;
+        }
+    }
+/*HS70 code for HS70 xxx by sunmao at 2020/04/15 end*/
+/*HS50 code for HS50 xxx by gaozhenyu at 2020/08/12 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+if(0 == strcmp(sensor_name, "s5k3l6_hs50_ofilm")||0 == strcmp(sensor_name, "s5k3l6_hs50_sjc")){
+		hi1336_type=sensor_i2c_client->addr_type;
+		sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+		if(0==strcmp(sensor_name, "s5k3l6_hs50_sjc")){
+	sensor_i2c_client->cci_client->sid=0xB0 >> 1;
+	}else
+	{
+		sensor_i2c_client->cci_client->sid=0xA0 >> 1;
+}
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&s5k3l6_supply_id,
+MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+		sensor_i2c_client->addr_type=hi1336_type;
+		if((0==strcmp(sensor_name, "s5k3l6_hs50_ofilm"))&&(s5k3l6_supply_id !=0x07)){
+              return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "s5k3l6_hs50_sjc"))&&(s5k3l6_supply_id !=0x10)){
+             return -ENODEV;
+        }
+        CDBG("s5k3l6 supply_id is %d %s,sensor_slave_addr=%x", s5k3l6_supply_id, sensor_name,slave_info->sensor_slave_addr);
+}
+/*HS50 code for HS50-SR-QL3095-01-97 gc5035com jk otp copatible by wangqi at 2020/10/13 start*/
+if(0 == strcmp(sensor_name, "gc5035_hs50_jk")||0 == strcmp(sensor_name, "gc5035_hs50_sjc")||0 == strcmp(sensor_name, "gc5035_com_hs50_jk")){
+	pr_err("gc5035 read eeprom enter %s", sensor_name);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf4,0x40, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf5,0xe9, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf6,0x14, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf8,0x49, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf9,0x82, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfa,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x81, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x01, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xd3,0x87, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x36,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf7,0x01,MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f,MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8f, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfc,0x8e, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xfe,0x02, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x55,0x80, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x65,0x7e, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x66,0x03, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xc0, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x68,0x11, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xe0,0x1f, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0x67,0xf0, MSM_CAMERA_I2C_BYTE_DATA);
+	sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, 0xf3,0x10, MSM_CAMERA_I2C_BYTE_DATA);
+if(0==strcmp(sensor_name, "gc5035_hs50_jk")){
+	sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd3,&gc5035_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+        if((gc5035_module_flag&0xc) == 0x4){
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd4,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd5,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+	else if((gc5035_module_flag&0x3) == 0x1){
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xda,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xdb,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+}else if(0==strcmp(sensor_name, "gc5035_hs50_sjc"))
+	{
+        sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xc3,&gc5035_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+        if((gc5035_module_flag&0xc) == 0x4){
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xc4,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xc5,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+	else if((gc5035_module_flag&0x3) == 0x1){
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xcc,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xcd,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+}else{
+	sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd3,&gc5035_module_flag, MSM_CAMERA_I2C_BYTE_DATA);
+        if((gc5035_module_flag&0xc) == 0x4){
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd4,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xd5,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+	else if((gc5035_module_flag&0x3) == 0x1){
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xda,&gc5035_supply_id, MSM_CAMERA_I2C_BYTE_DATA);
+		 sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0xdb,&gc5035_module_id, MSM_CAMERA_I2C_BYTE_DATA);
+	}
+}
+	CDBG("gc5035 read   gc5035_module_flag%x", gc5035_module_flag);
+	pr_err("gc5035 read eeprom is 0x%x 0x%x", gc5035_supply_id,gc5035_module_id);
+	if(0==strcmp(sensor_name, "gc5035_hs50_jk")){
+		if((gc5035_supply_id !=0x08)||(gc5035_module_id !=0x3b)){
+			return -ENODEV;
+		}
+	}
+	if(0==strcmp(sensor_name, "gc5035_hs50_sjc")){
+		if((gc5035_supply_id !=0x10)&&(gc5035_module_id !=0x3b)){
+			return -ENODEV;
+		}
+	}
+	if(0==strcmp(sensor_name, "gc5035_com_hs50_jk")){
+		if((gc5035_supply_id !=0x08)||(gc5035_module_id !=0x3a)){
+/*HS50 code for HS50-SR-QL3095-01-136 rm otp copatible gc5035com for default by wangqi at 2020/10/13 start*/
+			//return -ENODEV;
+/*HS50 code for HS50-SR-QL3095-01-136 rm otp copatible gc5035com for default by wangqi at 2020/10/13 start*/
+		}
+	}
+	}
+/*HS50 code for HS50-SR-QL3095-01-97 gc5035com jk otp copatible by wangqi at 2020/10/13 end*/
+/*HS50 code for HS50 xxx by chenjun6 at 2020/08/20 start*/
+if(0 == strcmp(sensor_name, "gc02m1_hs50_cxt")||0 == strcmp(sensor_name, "gc02m1_hs50_jk")||0 == strcmp(sensor_name, "gc02m1_hs50_sjc"))
+{
+ vendor_addr_type=sensor_i2c_client->addr_type;
+ sensor_i2c_client->cci_client->sid=0xA4 >> 1;
+ sensor_i2c_client->addr_type=MSM_CAMERA_I2C_WORD_ADDR;
+ bakeup_rc = sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client,0X0001,&gc02m1_supply_id,MSM_CAMERA_I2C_BYTE_DATA);
+ sensor_i2c_client->cci_client->sid=slave_info->sensor_slave_addr >> 1;
+ sensor_i2c_client->addr_type=vendor_addr_type;
+ CDBG("supply id is 0x%x" , gc02m1_supply_id);
+ if((0==strcmp(sensor_name, "gc02m1_hs50_cxt"))&&(gc02m1_supply_id !=0x54))
+ {
+              return -ENODEV;
+        }
+ else if((0 == strcmp(sensor_name, "gc02m1_hs50_jk"))&&(gc02m1_supply_id !=0x08))
+ {
+              return -ENODEV;
+        }
+ else if((0 == strcmp(sensor_name, "gc02m1_hs50_sjc"))&&(gc02m1_supply_id !=0x10))
+ {
+              return -ENODEV;
+        }
+ CDBG("gc02m1 is %s, supply_id is %d, sensor_slave_addr=%x", sensor_name, gc02m1_supply_id, slave_info->sensor_slave_addr);        
+}
+/*HS50 code for HS50 xxx by chenjun6 at 2020/08/20 end*/
+    if(0 == strcmp(sensor_name, "gc2375h_hs50_sjc")||0 == strcmp(sensor_name, "gc2375h_hs50_cxt")){
+        if(gpio_is_valid(SENSOR_SUB_GPIO_ID_HS50)){
+		gpio_direction_input(SENSOR_SUB_GPIO_ID_HS50);
+                msm_2m_id_hs70 = gpio_get_value(SENSOR_SUB_GPIO_ID_HS50);
+        }
+        pr_err("gc2375h msm_2m_id_hs50 is %d %s", msm_2m_id_hs70, sensor_name);
+        if((0==strcmp(sensor_name, "gc2375h_hs50_cxt"))&&(msm_2m_id_hs70 !=1)){
+            return -ENODEV;
+        }else if ((0 == strcmp(sensor_name, "gc2375h_hs50_sjc"))&&(msm_2m_id_hs70 !=0)){
+            return -ENODEV;
+        }
+    }
+#endif
+/*HS50 code for HS50 xxx by gaozhenyu at 2020/08/12 end*/
 	return rc;
 }
 
@@ -1550,7 +2238,22 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 {
 	struct msm_camera_cci_client *cci_client = NULL;
 	unsigned long mount_pos = 0;
-
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29start*/
+#ifdef CONFIG_MSM_CAMERA_HS60_ADDBOARD
+	int ret = 0;
+	ret = swtp_sku_conf();
+	if (!ret)
+	{
+		pr_err("swtp_sku_conf fail");
+		swtp_sku_conf();
+	}
+#endif
+/*HS60 code for HS60-3438 by xuxianwei at 2019/10/29end*/
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 start*/
+#ifdef HUAQIN_KERNEL_PROJECT_HS50
+	hs50_board_id = read_hs50_id();
+#endif
+/*HS50 code for HS50-SR-QL3095-01-97 by chenjun6 at 2020/09/08 end*/
 	/* Validate input parameters */
 	if (!s_ctrl) {
 		pr_err("%s:%d failed: invalid params s_ctrl %pK\n", __func__,

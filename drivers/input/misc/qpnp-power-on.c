@@ -35,6 +35,8 @@
 #include <linux/qpnp/qpnp-misc.h>
 #include <linux/power_supply.h>
 
+#include <linux/sec_debug.h>
+
 #define PMIC_VER_8941           0x01
 #define PMIC_VERSION_REG        0x0105
 #define PMIC_VERSION_REV4_REG   0x0103
@@ -210,6 +212,9 @@ struct qpnp_pon {
 	int			pon_power_off_reason;
 	int			num_pon_reg;
 	int			num_pon_config;
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+	int powerkey_state;
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
 	u32			dbc_time_us;
 	u32			uvlo;
 	int			warm_reset_poff_type;
@@ -246,6 +251,11 @@ module_param_named(
 static struct qpnp_pon *sys_reset_dev;
 static DEFINE_SPINLOCK(spon_list_slock);
 static LIST_HEAD(spon_dev_list);
+
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+static int check_pkey_press;
+static int check_vdkey_press;
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
 
 static u32 s1_delay[PON_S1_COUNT_MAX + 1] = {
 	0, 32, 56, 80, 138, 184, 272, 408, 608, 904, 1352, 2048,
@@ -934,9 +944,11 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	struct qpnp_pon_config *cfg = NULL;
 	u8  pon_rt_bit = 0;
 	u32 key_status;
-	uint pon_rt_sts;
+	uint pon_rt_sts, pon_rt_sts_ori;
 	u64 elapsed_us;
+	u8 first = 1;
 
+again:
 	cfg = qpnp_get_cfg(pon, pon_type);
 	if (!cfg)
 		return -EINVAL;
@@ -954,11 +966,14 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 		}
 	}
 
-	/* check the RT status to get the current status of the line */
-	rc = regmap_read(pon->regmap, QPNP_PON_RT_STS(pon), &pon_rt_sts);
-	if (rc) {
-		dev_err(&pon->pdev->dev, "Unable to read PON RT status\n");
-		return rc;
+	if (first) {
+		/* check the RT status to get the current status of the line */
+		rc = regmap_read(pon->regmap, QPNP_PON_RT_STS(pon), &pon_rt_sts_ori);
+		if (rc) {
+			dev_err(&pon->pdev->dev, "Unable to read PON RT status\n");
+			return rc;
+		}
+		pon_rt_sts = pon_rt_sts_ori;
 	}
 
 	switch (cfg->pon_type) {
@@ -978,8 +993,8 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 		return -EINVAL;
 	}
 
-	pr_debug("PMIC input: code=%d, sts=0x%hhx\n",
-					cfg->key_code, pon_rt_sts);
+	pr_debug("PMIC input: code=%d, sts=0x%hhx, 0x%hhx\n",
+					cfg->key_code, pon_rt_sts_ori, pon_rt_sts);
 	key_status = pon_rt_sts & pon_rt_bit;
 
 	if (pon->kpdpwr_dbc_enable && cfg->pon_type == PON_KPDPWR) {
@@ -987,22 +1002,70 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 			pon->kpdpwr_last_release_time = ktime_get();
 	}
 
-	/*
-	 * simulate press event in case release event occurred
-	 * without a press event
-	 */
-	if (!cfg->old_state && !key_status) {
-		input_report_key(pon->pon_input, cfg->key_code, 1);
+	if (!(cfg->old_state && !!key_status)) {
+		/*
+		 * simulate press event in case release event occurred
+		 * without a press event
+		 */
+		if (!cfg->old_state && !key_status) {
+			input_report_key(pon->pon_input, cfg->key_code, 1);
+			input_sync(pon->pon_input);
+		}
+
+		input_report_key(pon->pon_input, cfg->key_code, key_status);
 		input_sync(pon->pon_input);
+		pr_info("%s %s: %d, 0x%x, 0x%x, %d\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
+	} else
+		pr_debug("%s %s: %d, 0x%x, 0x%x, %d (skip)\n", SECLOG, __func__, cfg->key_code, pon_rt_sts_ori, pon_rt_sts, !!key_status);
+
+
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+	/* RESIN is used for VOL DOWN key, it should report the keycode for kernel panic */
+	if ((cfg->key_code == KEY_VOLUMEDOWN) && (pon_rt_sts & pon_rt_bit)) {
+		pon->powerkey_state = 1;
+		check_vdkey_press = 1;
+	} else if ((cfg->key_code == KEY_VOLUMEDOWN)
+			   && !(pon_rt_sts & pon_rt_bit)) {
+		pon->powerkey_state = 0;
+		check_vdkey_press = 0;
 	}
-
-	input_report_key(pon->pon_input, cfg->key_code, key_status);
-	input_sync(pon->pon_input);
-
+	if ((cfg->key_code == KEY_POWER) && (pon_rt_sts & pon_rt_bit)) {
+		pon->powerkey_state = 1;
+		check_pkey_press = 1;
+	} else if ((cfg->key_code == KEY_POWER) && !(pon_rt_sts & pon_rt_bit)) {
+		pon->powerkey_state = 0;
+		check_pkey_press = 0;
+	}
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
 	cfg->old_state = !!key_status;
+
+	if (first) {
+		first = 0;
+		pon_rt_sts &= ~pon_rt_bit;
+		if (pon_rt_sts & QPNP_PON_RESIN_N_SET) {
+			pon_type = PON_RESIN;
+			goto again;
+		} else if (pon_rt_sts & QPNP_PON_KPDPWR_N_SET) {
+			pon_type = PON_KPDPWR;
+			goto again;
+		}
+	}
 
 	return 0;
 }
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 start*/
+int get_pkey_press(void)
+{
+	return check_pkey_press;
+}
+EXPORT_SYMBOL(get_pkey_press);
+
+int get_vdkey_press(void)
+{
+	return check_vdkey_press;
+}
+EXPORT_SYMBOL(get_vdkey_press);
+/*huaqin added by liufurong for SR-ZQL1695-01000000584 at 20190719 end*/
 
 static irqreturn_t qpnp_kpdpwr_irq(int irq, void *_pon)
 {
@@ -1275,6 +1338,12 @@ qpnp_config_reset(struct qpnp_pon *pon, struct qpnp_pon_config *cfg)
 		return rc;
 	}
 
+#ifdef CONFIG_SEC_DEBUG
+	/* Configure reset type:
+	 * always do warm reset regardless of debug level
+	 */
+	cfg->s2_type = PON_POWER_OFF_WARM_RESET;
+#endif
 	rc = qpnp_pon_masked_write(pon, cfg->s2_cntl_addr,
 				QPNP_PON_S2_CNTL_TYPE_MASK, (u8)cfg->s2_type);
 	if (rc) {
@@ -2663,3 +2732,35 @@ module_exit(qpnp_pon_exit);
 
 MODULE_DESCRIPTION("QPNP PMIC POWER-ON driver");
 MODULE_LICENSE("GPL v2");
+
+#if defined(CONFIG_SEC_DEBUG)
+int qpnp_control_s2_reset_onoff(int on)
+{
+	int rc;
+	struct qpnp_pon *pon = sys_reset_dev;
+	struct qpnp_pon_config *cfg;
+
+	cfg = qpnp_get_cfg(pon, PON_KPDPWR_RESIN);
+	if (!cfg) {
+		pr_err("Invalid config pointer\n");
+		return -EFAULT;
+	}
+#if 0
+	u16 s1_timer_addr = QPNP_PON_KPDPWR_RESIN_S1_TIMER(pon);
+
+	/* Make sure S1 Timer set to 0xE(MS_6720) */
+	if (on) {
+		rc = qpnp_pon_masked_write(pon, s1_timer_addr, QPNP_PON_S1_TIMER_MASK, 0xE);
+	}
+#endif
+	/* control S2 reset */
+	rc = qpnp_pon_masked_write(pon, cfg->s2_cntl2_addr,
+				QPNP_PON_S2_CNTL_EN, on ? QPNP_PON_S2_CNTL_EN : 0);
+	if (rc) {
+		dev_err(&pon->pdev->dev, "Unable to configure S2 enable\n");
+		return rc;
+	}
+
+	return 0;
+}
+#endif

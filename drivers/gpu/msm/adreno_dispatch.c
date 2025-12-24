@@ -1411,6 +1411,22 @@ int adreno_dispatcher_queue_cmds(struct kgsl_device_private *dev_priv,
 
 	user_ts = *timestamp;
 
+	/*
+	 * If there is only one drawobj in the array and it is of
+	 * type SYNCOBJ_TYPE, skip comparing user_ts as it can be 0
+	 */
+	if (!(count == 1 && drawobj[0]->type == SYNCOBJ_TYPE) &&
+		(drawctxt->base.flags & KGSL_CONTEXT_USER_GENERATED_TS)) {
+		/*
+		 * User specified timestamps need to be greater than the last
+		 * issued timestamp in the context
+		 */
+		if (timestamp_cmp(drawctxt->timestamp, user_ts) >= 0) {
+			spin_unlock(&drawctxt->lock);
+			return -ERANGE;
+		}
+	}
+
 	for (i = 0; i < count; i++) {
 
 		switch (drawobj[i]->type) {
@@ -1685,7 +1701,7 @@ static inline const char *_kgsl_context_comm(struct kgsl_context *context)
 #define pr_fault(_d, _c, fmt, args...) \
 		dev_err((_d)->dev, "%s[%d]: " fmt, \
 		_kgsl_context_comm((_c)->context), \
-		(_c)->context->proc_priv->pid, ##args)
+		pid_nr((_c)->context->proc_priv->pid), ##args)
 
 
 static void adreno_fault_header(struct kgsl_device *device,

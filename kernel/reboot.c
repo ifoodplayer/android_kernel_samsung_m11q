@@ -43,6 +43,8 @@ int reboot_default = 1;
 int reboot_cpu;
 enum reboot_type reboot_type = BOOT_ACPI;
 int reboot_force;
+// To prevent kernel panic by EIO during shutdown
+int ignore_fs_panic;
 
 /*
  * If set, this is used for preparing the system to power off.
@@ -70,6 +72,7 @@ void kernel_restart_prepare(char *cmd)
 	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
 	system_state = SYSTEM_RESTART;
 	usermodehelper_disable();
+	ignore_fs_panic = 1;
 	device_shutdown();
 }
 
@@ -231,6 +234,7 @@ static void kernel_shutdown_prepare(enum system_states state)
 		(state == SYSTEM_HALT) ? SYS_HALT : SYS_POWER_OFF, NULL);
 	system_state = state;
 	usermodehelper_disable();
+	ignore_fs_panic = 1;
 	device_shutdown();
 }
 /**
@@ -277,6 +281,9 @@ static DEFINE_MUTEX(reboot_mutex);
  *
  * reboot doesn't sync: do that yourself before calling this.
  */
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+extern bool hs50_kernel_power_off;
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
 SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		void __user *, arg)
 {
@@ -331,11 +338,21 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		panic("cannot halt");
 
 	case LINUX_REBOOT_CMD_POWER_OFF:
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+		hs50_kernel_power_off = true;
+#endif
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
 		kernel_power_off();
 		do_exit(0);
 		break;
 
 	case LINUX_REBOOT_CMD_RESTART2:
+/*HS50 code for HS50EU-488 by gaozhengwei at 2021/01/04 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+		hs50_kernel_power_off = true;
+#endif
+/*HS50 code for HS50EU-488 by gaozhengwei at 2021/01/04 end*/
 		ret = strncpy_from_user(&buffer[0], arg, sizeof(buffer) - 1);
 		if (ret < 0) {
 			ret = -EFAULT;

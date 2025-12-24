@@ -832,6 +832,37 @@ static int mmc_compare_ext_csds(struct mmc_card *card, unsigned bus_width)
 	return err;
 }
 
+static char un_buf[21];
+#define UN_LENGTH 20
+static int __init un_boot_state_param(char *line)
+{
+	if (strlen(line) == UN_LENGTH) 
+		strncpy(un_buf, line, UN_LENGTH);
+
+	return 1;
+}
+__setup("androidboot.un=", un_boot_state_param);
+
+static ssize_t mmc_gen_unique_number_show(struct device *dev,
+		struct device_attribute *attr,
+		char *buf)
+{
+	struct mmc_card *card = mmc_dev_to_card(dev);
+	ssize_t n = 0;
+
+	n = sprintf(buf, "H%02X%02X%02X%X%02X%08X%02X\n",
+			card->cid.manfid, card->cid.prod_name[0], card->cid.prod_name[1],
+			card->cid.prod_name[2]>>4, card->cid.prv, card->cid.serial,
+			UNSTUFF_BITS(card->raw_cid, 8, 8));
+
+	if (strncmp(un_buf, buf, UN_LENGTH) != 0) {
+		pr_info("%s: eMMC UN mismatch\n", __func__);
+		BUG_ON(1);
+	}
+	
+	return n;
+}
+
 MMC_DEV_ATTR(cid, "%08x%08x%08x%08x\n", card->raw_cid[0], card->raw_cid[1],
 	card->raw_cid[2], card->raw_cid[3]);
 MMC_DEV_ATTR(csd, "%08x%08x%08x%08x\n", card->raw_csd[0], card->raw_csd[1],
@@ -874,6 +905,7 @@ static ssize_t mmc_fwrev_show(struct device *dev,
 	}
 }
 
+static DEVICE_ATTR(unique_number, (S_IRUSR|S_IRGRP), mmc_gen_unique_number_show, NULL);
 static DEVICE_ATTR(fwrev, S_IRUGO, mmc_fwrev_show, NULL);
 
 static ssize_t mmc_dsr_show(struct device *dev,
@@ -916,6 +948,7 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_rel_sectors.attr,
 	&dev_attr_ocr.attr,
 	&dev_attr_dsr.attr,
+	&dev_attr_unique_number.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(mmc_std);

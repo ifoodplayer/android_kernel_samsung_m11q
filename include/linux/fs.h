@@ -2624,6 +2624,7 @@ static inline ssize_t generic_write_sync(struct kiocb *iocb, ssize_t count)
 
 extern void emergency_sync(void);
 extern void emergency_remount(void);
+extern int intr_sync(int *);
 #ifdef CONFIG_BLOCK
 extern sector_t bmap(struct inode *, sector_t);
 #endif
@@ -3287,5 +3288,7 @@ static inline bool dir_relax_shared(struct inode *inode)
 
 extern bool path_noexec(const struct path *path);
 extern void inode_nohighmem(struct inode *inode);
+
+#define AID_USE_ROOT_RESERVED	KGIDT_INIT(5678)
 
 #endif /* _LINUX_FS_H */

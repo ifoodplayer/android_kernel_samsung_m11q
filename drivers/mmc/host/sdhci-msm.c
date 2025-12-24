@@ -41,6 +41,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/nvmem-consumer.h>
 #include <trace/events/mmc.h>
+#include <linux/sec_class.h>
 
 #include "sdhci-msm.h"
 #include "sdhci-msm-ice.h"
@@ -2629,10 +2630,15 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 
 	for (i = 0; i < ARRAY_SIZE(vreg_table); i++) {
 		if (vreg_table[i]) {
-			if (enable)
+		/*HS60 code for HS60-190 by lanshiming at 2019/7/25 start*/
+			if (enable) {
 				ret = sdhci_msm_vreg_enable(vreg_table[i]);
-			else
+			}
+			else{
 				ret = sdhci_msm_vreg_disable(vreg_table[i]);
+				mdelay(3);
+			}
+		/*HS60 code for HS60-190 by lanshiming at 2019/7/25 end*/
 			if (ret)
 				goto out;
 		}
@@ -4793,6 +4799,95 @@ static bool sdhci_msm_is_bootdevice(struct device *dev)
 	return true;
 }
 
+/* SYSFS for service center support */
+static struct device *sd_info_dev;
+static ssize_t sd_count_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = dev_get_drvdata(dev);
+	struct mmc_card *card = host->card;
+	struct mmc_card_error_log *err_log;
+	u64 total_cnt = 0;
+	int len = 0;
+	int i = 0;
+
+	if (!card) {
+		len = snprintf(buf, PAGE_SIZE, "no card\n");
+		goto out;
+	}
+
+	err_log = card->err_log;
+
+	for (i = 0; i < 6; i++) {
+		if (total_cnt < MAX_CNT_U64)
+			total_cnt += err_log[i].count;
+	}
+	len = snprintf(buf, PAGE_SIZE, "%lld\n", total_cnt);
+
+out:
+	return len;
+}
+
+static ssize_t sd_cid_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = dev_get_drvdata(dev);
+	struct mmc_card *card = host->card;
+	int len = 0;
+
+	if (!card) {
+		len = snprintf(buf, PAGE_SIZE, "no card\n");
+		goto out;
+	}
+
+	len = snprintf(buf, PAGE_SIZE,
+			"%08x%08x%08x%08x\n",
+			card->raw_cid[0], card->raw_cid[1],
+			card->raw_cid[2], card->raw_cid[3]);
+out:
+	return len;
+}
+
+static ssize_t sd_health_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = dev_get_drvdata(dev);
+	struct mmc_card *card = host->card;
+	struct mmc_card_error_log *err_log;
+	u64 total_c_cnt = 0;
+	u64 total_t_cnt = 0;
+	int len = 0;
+	int i = 0;
+
+	if (!card) {
+		//There should be no spaces in 'No Card'(Vold Team).
+		len = snprintf(buf, PAGE_SIZE, "NOCARD\n");
+		goto out;
+	}
+
+	err_log = card->err_log;
+
+	for (i = 0; i < 6; i++) {
+		if (err_log[i].err_type == -EILSEQ && total_c_cnt < MAX_CNT_U64)
+			total_c_cnt += err_log[i].count;
+		if (err_log[i].err_type == -ETIMEDOUT && total_t_cnt < MAX_CNT_U64)
+			total_t_cnt += err_log[i].count;
+	}
+
+	if(err_log[0].ge_cnt > 100 || err_log[0].ecc_cnt > 0 || err_log[0].wp_cnt > 0 ||
+			err_log[0].oor_cnt > 10 || total_t_cnt > 100 || total_c_cnt > 100)
+		len = snprintf(buf, PAGE_SIZE, "BAD\n");
+	else
+		len = snprintf(buf, PAGE_SIZE, "GOOD\n");
+
+out:
+	return len;
+}
+
+static DEVICE_ATTR(sd_count, S_IRUGO, sd_count_show, NULL);
+static DEVICE_ATTR(data, 0444, sd_cid_show, NULL);
+static DEVICE_ATTR(fc, 0444, sd_health_show, NULL);
+
 static int sdhci_msm_probe(struct platform_device *pdev)
 {
 	const struct sdhci_msm_offset *msm_host_offset;
@@ -5240,6 +5335,33 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 					__func__, ret);
 			goto vreg_deinit;
 		}
+	}
+
+#if defined(CONFIG_NO_DETECT_PIN)
+	if (sd_info_dev == NULL && !strcmp(host->hw_name, "7864900.sdhci")) {
+#else
+	if (sd_info_dev == NULL && gpio_is_valid(msm_host->pdata->status_gpio)) {
+#endif
+		sd_info_dev = sec_device_create(0, NULL, "sdinfo");
+		if (IS_ERR(sd_info_dev))
+			pr_err("%s : Failed to create device!\n", __func__);
+
+		if (device_create_file(sd_info_dev,
+					&dev_attr_sd_count) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_sd_count.attr.name);
+
+		if (device_create_file(sd_info_dev,
+					&dev_attr_data) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_data.attr.name);
+
+		if (device_create_file(sd_info_dev,
+					&dev_attr_fc) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_fc.attr.name);
+
+		dev_set_drvdata(sd_info_dev, msm_host->mmc);
 	}
 
 	if ((sdhci_readl(host, SDHCI_CAPABILITIES) & SDHCI_CAN_64BIT) &&

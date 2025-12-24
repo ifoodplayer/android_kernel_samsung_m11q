@@ -33,7 +33,9 @@
 #define UID_HASH_BITS	10
 DECLARE_HASHTABLE(hash_table, UID_HASH_BITS);
 
-static DEFINE_RT_MUTEX(uid_lock);
+//static DEFINE_RT_MUTEX(uid_lock);
+DEFINE_RT_MUTEX(uid_lock);
+
 static struct proc_dir_entry *cpu_parent;
 static struct proc_dir_entry *io_parent;
 static struct proc_dir_entry *proc_parent;
@@ -77,6 +79,50 @@ struct uid_entry {
 	DECLARE_HASHTABLE(task_entries, UID_HASH_BITS);
 #endif
 };
+
+/* uid_lock deadlock debug. no owner && tons of watiers with D state */
+#define RT_MUTEX_HAS_WAITERS	1UL
+
+static struct task_struct *uid_last_owner;
+struct task_struct * uid_last_waiter;
+
+static unsigned long uid_last_unlock;
+unsigned long uid_last_waiter_wake_q;
+unsigned long uid_last_waiter_wake_up_q;
+static DEFINE_SPINLOCK(rt_mutex_spin_lock);
+
+void uid_rt_mutex_lock(struct rt_mutex *lock)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&rt_mutex_spin_lock, flags);
+	if((lock->owner == (void *)RT_MUTEX_HAS_WAITERS) && time_after(jiffies, uid_last_unlock + msecs_to_jiffies(3000)))
+	{
+		pr_info("%s : failed to wakeup waiters after jiffies %lx", __func__, uid_last_unlock);
+
+		// it is a dangerous code as the owner/waiter might be already exited, just try!
+		pr_info("%s : owner : %s(%d) waiter : %s(%d)\n", 
+			__func__, uid_last_owner->comm, uid_last_owner->pid, uid_last_waiter->comm, uid_last_waiter->pid);
+		
+		show_stack(uid_last_waiter, NULL);
+		show_stack(uid_last_owner, NULL);
+		panic("uid_rt_mutex_lock RT_MUTEX_HAS_WAITERS detected");
+	}
+	spin_unlock_irqrestore(&rt_mutex_spin_lock, flags);
+
+	rt_mutex_lock(lock);
+}
+
+void uid_rt_mutex_unlock(struct rt_mutex *lock)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&rt_mutex_spin_lock, flags);
+	uid_last_owner = current;
+	uid_last_unlock = jiffies;
+	spin_unlock_irqrestore(&rt_mutex_spin_lock, flags);
+	rt_mutex_unlock(lock);
+}
 
 static u64 compute_write_bytes(struct task_struct *task)
 {
@@ -339,7 +385,7 @@ static int uid_cputime_show(struct seq_file *m, void *v)
 	unsigned long bkt;
 	uid_t uid;
 
-	rt_mutex_lock(&uid_lock);
+	uid_rt_mutex_lock(&uid_lock);
 
 	hash_for_each(hash_table, bkt, uid_entry, hash) {
 		uid_entry->active_stime = 0;
@@ -353,7 +399,7 @@ static int uid_cputime_show(struct seq_file *m, void *v)
 			uid_entry = find_or_register_uid(uid);
 		if (!uid_entry) {
 			rcu_read_unlock();
-			rt_mutex_unlock(&uid_lock);
+			uid_rt_mutex_unlock(&uid_lock);
 			pr_err("%s: failed to find the uid_entry for uid %d\n",
 				__func__, uid);
 			return -ENOMEM;
@@ -376,7 +422,7 @@ static int uid_cputime_show(struct seq_file *m, void *v)
 				cputime_to_jiffies(total_stime)) * USEC_PER_MSEC);
 	}
 
-	rt_mutex_unlock(&uid_lock);
+	uid_rt_mutex_unlock(&uid_lock);
 	return 0;
 }
 
@@ -427,7 +473,7 @@ static ssize_t uid_remove_write(struct file *file,
 	/* Also remove uids from /proc/uid_time_in_state */
 	cpufreq_task_times_remove_uids(uid_start, uid_end);
 
-	rt_mutex_lock(&uid_lock);
+	uid_rt_mutex_lock(&uid_lock);
 
 	for (; uid_start <= uid_end; uid_start++) {
 		hash_for_each_possible_safe(hash_table, uid_entry, tmp,
@@ -440,7 +486,7 @@ static ssize_t uid_remove_write(struct file *file,
 		}
 	}
 
-	rt_mutex_unlock(&uid_lock);
+	uid_rt_mutex_unlock(&uid_lock);
 	return count;
 }
 
@@ -529,7 +575,7 @@ static int uid_io_show(struct seq_file *m, void *v)
 	struct uid_entry *uid_entry;
 	unsigned long bkt;
 
-	rt_mutex_lock(&uid_lock);
+	uid_rt_mutex_lock(&uid_lock);
 
 	update_io_stats_all_locked();
 
@@ -550,7 +596,7 @@ static int uid_io_show(struct seq_file *m, void *v)
 		show_io_uid_tasks(m, uid_entry);
 	}
 
-	rt_mutex_unlock(&uid_lock);
+	uid_rt_mutex_unlock(&uid_lock);
 	return 0;
 }
 
@@ -594,16 +640,16 @@ static ssize_t uid_procstat_write(struct file *file,
 	if (state != UID_STATE_BACKGROUND && state != UID_STATE_FOREGROUND)
 		return -EINVAL;
 
-	rt_mutex_lock(&uid_lock);
+	uid_rt_mutex_lock(&uid_lock);
 
 	uid_entry = find_or_register_uid(uid);
 	if (!uid_entry) {
-		rt_mutex_unlock(&uid_lock);
+		uid_rt_mutex_unlock(&uid_lock);
 		return -EINVAL;
 	}
 
 	if (uid_entry->state == state) {
-		rt_mutex_unlock(&uid_lock);
+		uid_rt_mutex_unlock(&uid_lock);
 		return count;
 	}
 
@@ -611,7 +657,7 @@ static ssize_t uid_procstat_write(struct file *file,
 
 	uid_entry->state = state;
 
-	rt_mutex_unlock(&uid_lock);
+	uid_rt_mutex_unlock(&uid_lock);
 
 	return count;
 }
@@ -633,7 +679,7 @@ static int process_notifier(struct notifier_block *self,
 	if (!task)
 		return NOTIFY_OK;
 
-	rt_mutex_lock(&uid_lock);
+	uid_rt_mutex_lock(&uid_lock);
 	uid = from_kuid_munged(current_user_ns(), task_uid(task));
 	uid_entry = find_or_register_uid(uid);
 	if (!uid_entry) {
@@ -648,7 +694,7 @@ static int process_notifier(struct notifier_block *self,
 	add_uid_io_stats(uid_entry, task, UID_STATE_DEAD_TASKS);
 
 exit:
-	rt_mutex_unlock(&uid_lock);
+	uid_rt_mutex_unlock(&uid_lock);
 	return NOTIFY_OK;
 }
 

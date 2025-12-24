@@ -22,6 +22,11 @@ struct qg_batt_props {
 	int			vbatt_full_mv;
 	int			fastchg_curr_ma;
 	int			qg_profile_version;
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	bool			qg_batt_aging_enable;
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 };
 
 struct qg_irq_info {
@@ -76,6 +81,16 @@ struct qg_esr_data {
 	bool			valid;
 };
 
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+struct range_data {
+	u32 low_threshold;
+	u32 high_threshold;
+	u32 value;
+};
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
+
 struct qpnp_qg {
 	struct device		*dev;
 	struct pmic_revid_data	*pmic_rev_id;
@@ -108,7 +123,23 @@ struct qpnp_qg {
 	struct power_supply	*usb_psy;
 	struct power_supply	*parallel_psy;
 	struct qg_esr_data	esr_data[QG_MAX_ESR_COUNT];
-
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	struct range_data	vfloat_data[MAX_VFLOAT_ENTRIES];
+	struct range_data	vbat_rechg_data[MAX_VFLOAT_ENTRIES];
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	int			batt_cycle;
+	#endif
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 end */
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+	int			batt_id_error;
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 start */
+	int			batt_id_ohm_default;
+	/*HS60 & HS70 add for HS70-1415 Aging Test Workaround by wangzikang at 2019/11/20 end */
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 	/* status variable */
 	u32			*debug_mask;
 	bool			qg_device_open;

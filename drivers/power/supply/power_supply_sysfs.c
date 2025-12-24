@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/stat.h>
 
+
 #include "power_supply.h"
 
 /*
@@ -43,19 +44,46 @@ static struct device_attribute power_supply_attrs[];
 static ssize_t power_supply_show_property(struct device *dev,
 					  struct device_attribute *attr,
 					  char *buf) {
+	/* HS60 add for SR-ZQL1871-01-299 OTG psy by wangzikang at 2019/10/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	static char *type_text[] = {
+		"Unknown", "Battery", "UPS", "Mains", "USB", "USB_DCP",
+		"USB_CDP", "USB_ACA", "USB_HVDCP", "USB_HVDCP_3", "USB_PD",
+		"Wireless", "USB_FLOAT", "BMS", "Parallel", "Main", "Wipower",
+		/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 start*/
+		"TYPEC", "TYPEC_UFP", "TYPEC_DFP","OTG",
+		#if defined(CONFIG_AFC)
+		"AFC"
+		#endif
+		/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 start*/
+	};
+	#else
 	static char *type_text[] = {
 		"Unknown", "Battery", "UPS", "Mains", "USB", "USB_DCP",
 		"USB_CDP", "USB_ACA", "USB_HVDCP", "USB_HVDCP_3", "USB_PD",
 		"Wireless", "USB_FLOAT", "BMS", "Parallel", "Main", "Wipower",
 		"TYPEC", "TYPEC_UFP", "TYPEC_DFP"
 	};
+	#endif
+	/* HS60 add for SR-ZQL1871-01-299 OTG psy by wangzikang at 2019/10/29 end */
 	static char *status_text[] = {
 		"Unknown", "Charging", "Discharging", "Not charging", "Full"
 	};
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named /sys/class/power_supply/battery/charge_type by gaochao at 2019/08/08 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/16 start */
+	static char *charge_type[] = {
+		"Unknown", "N/A", "Trickle", "Fast",
+		"Taper", "Slow"
+	};
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/16 end */
+	#else
 	static char *charge_type[] = {
 		"Unknown", "N/A", "Trickle", "Fast",
 		"Taper"
 	};
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named /sys/class/power_supply/battery/charge_type by gaochao at 2019/08/08 end */
 	static char *health_text[] = {
 		"Unknown", "Good", "Overheat", "Dead", "Over voltage",
 		"Unspecified failure", "Cold", "Watchdog timer expire",
@@ -158,19 +186,36 @@ static ssize_t power_supply_store_property(struct device *dev,
 	const ptrdiff_t off = attr - power_supply_attrs;
 	union power_supply_propval value;
 	long long_val;
-
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by wangzikang at 2019/10/01 start */
+	#if !defined(HQ_FACTORY_BUILD) //ss version
+	int x;
+	if(off == POWER_SUPPLY_PROP_STORE_MODE){
+		if(sscanf(buf,"%10d\n",&x)==1){
+			value.intval = x;
+			pr_err("WT buf %s, store_mode %d, \n",buf,x);
+		}
+	} else {
+		/* TODO: support other types than int */
+		ret = kstrtol(buf, 10, &long_val);
+		if(ret < 0)
+			return ret;
+		value.intval = long_val;
+	}
+	#else
 	/* TODO: support other types than int */
 	ret = kstrtol(buf, 10, &long_val);
 	if (ret < 0)
 		return ret;
 
 	value.intval = long_val;
-
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by wangzikang at 2019/10/01 end */
 	ret = power_supply_set_property(psy, off, &value);
 	if (ret < 0)
 		return ret;
 
 	return count;
+
 }
 
 /* Must be in the same order as POWER_SUPPLY_PROP_* */
@@ -179,6 +224,41 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(status),
 	POWER_SUPPLY_ATTR(charge_type),
 	POWER_SUPPLY_ATTR(health),
+	/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(batt_current_event),
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 end */
+	/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(batt_misc_event),
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 end */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(store_mode),
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(batt_slate_mode),
+	#endif
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 end */
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(batt_current_ua_now),
+	POWER_SUPPLY_ATTR(battery_cycle),
+	#endif
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 end */
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 start*/
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	#if defined(CONFIG_AFC)
+	POWER_SUPPLY_ATTR(hv_charger_status),
+	POWER_SUPPLY_ATTR(afc_result),
+	POWER_SUPPLY_ATTR(hv_disable),
+	#endif
+	#endif
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 end*/
 	POWER_SUPPLY_ATTR(present),
 	POWER_SUPPLY_ATTR(online),
 	POWER_SUPPLY_ATTR(authentic),
@@ -327,6 +407,11 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(batt_profile_version),
 	POWER_SUPPLY_ATTR(batt_full_current),
 	POWER_SUPPLY_ATTR(recharge_soc),
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_ATTR(recharge_vbat),
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 	POWER_SUPPLY_ATTR(toggle_stat),
 	POWER_SUPPLY_ATTR(allow_hvdcp3),
 	POWER_SUPPLY_ATTR(hvdcp_opti_allowed),
@@ -342,6 +427,9 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(fcc_stepper_enable),
 	POWER_SUPPLY_ATTR(cc_soc),
 	POWER_SUPPLY_ATTR(qg_vbms_mode),
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+	POWER_SUPPLY_ATTR(batt_id_error),
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end*/
 	POWER_SUPPLY_ATTR(real_capacity),
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_ATTR(charge_counter_ext),

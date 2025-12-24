@@ -28,6 +28,8 @@
 #include <asm/fpsimd.h>
 #include <asm/cputype.h>
 
+#include <linux/sec_debug.h>
+
 #define FPEXC_IOF	(1 << 0)
 #define FPEXC_DZF	(1 << 1)
 #define FPEXC_OFF	(1 << 2)
@@ -146,10 +148,12 @@ void fpsimd_thread_switch(struct task_struct *next)
 		struct fpsimd_state *st = &next->thread.fpsimd_state;
 
 		if (__this_cpu_read(fpsimd_last_state) == st
-		    && st->cpu == smp_processor_id())
+		    && st->cpu == smp_processor_id()) {
+			if (IS_ENABLED(CONFIG_KERNEL_MODE_NEON_DEBUG))
+				fpsimd_context_check(next);
 			clear_ti_thread_flag(task_thread_info(next),
 					     TIF_FOREIGN_FPSTATE);
-		else
+		} else
 			set_ti_thread_flag(task_thread_info(next),
 					   TIF_FOREIGN_FPSTATE);
 	}

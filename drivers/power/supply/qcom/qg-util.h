@@ -27,5 +27,10 @@ int qg_write_monotonic_soc(struct qpnp_qg *chip, int msoc);
 int qg_get_battery_temp(struct qpnp_qg *chip, int *batt_temp);
 int qg_get_battery_current(struct qpnp_qg *chip, int *ibat_ua);
 int qg_get_battery_voltage(struct qpnp_qg *chip, int *vbat_uv);
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+int get_val(struct range_data *range, int cycle_count, int *val);
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 
 #endif

@@ -52,6 +52,12 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
+#ifdef CONFIG_MMC_SUPPORT_STLOG
+#include <linux/fslog.h>
+#else
+#define ST_LOG(fmt,...)
+#endif
+
 /* If the device is not responding */
 #define MMC_CORE_TIMEOUT_MS	(10 * 60 * 1000) /* 10 minute timeout */
 
@@ -503,6 +509,11 @@ EXPORT_SYMBOL(mmc_clk_update_freq);
 int mmc_recovery_fallback_lower_speed(struct mmc_host *host)
 {
 	int err = 0;
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+	int cd_err = 0;
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
 	if (!host->card)
 		return -EINVAL;
 
@@ -521,6 +532,20 @@ int mmc_recovery_fallback_lower_speed(struct mmc_host *host)
 	if (err)
 		pr_err("%s: %s: Fallback to lower speed mode failed with err=%d\n",
 			mmc_hostname(host), __func__, err);
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+	if (err){
+		if(!strcmp("mmc1",mmc_hostname(host)) && host->ops->get_cd)
+			cd_err = host->ops->get_cd(host);
+		if(cd_err == 0) {
+				pr_err("TQY:%s:card is not present:%d\n",mmc_hostname(host),cd_err);
+				dump_stack();
+			}
+		else
+			pr_err("TQY:%s: %s: card is present:%d\n", mmc_hostname(host), __func__,cd_err);
+		}
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910end
 
 	return err;
 }
@@ -3565,6 +3590,11 @@ static void _mmc_detect_change(struct mmc_host *host, unsigned long delay,
  */
 void mmc_detect_change(struct mmc_host *host, unsigned long delay)
 {
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY:%s: %s: status change: %ld\n", mmc_hostname(host), __func__,delay);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 	_mmc_detect_change(host, delay, true);
 }
 EXPORT_SYMBOL(mmc_detect_change);
@@ -4380,6 +4410,12 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 	pr_info("%s: %s: trying to init card at %u Hz\n",
 		mmc_hostname(host), __func__, host->f_init);
 #endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY: %s: %s: trying to init card at %u Hz\n",
+		mmc_hostname(host), __func__, host->f_init);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190909 end
 	mmc_power_up(host, host->ocr_avail);
 
 	/*
@@ -4438,6 +4474,11 @@ int _mmc_detect_card_removed(struct mmc_host *host)
 	if (!ret && host->ops->get_cd && !host->ops->get_cd(host)) {
 		mmc_detect_change(host, msecs_to_jiffies(200));
 		pr_debug("%s: card removed too slowly\n", mmc_hostname(host));
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+		pr_err("TQY: %s: card removed too slowly\n", mmc_hostname(host));
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
 	}
 
 	if (ret) {
@@ -4451,6 +4492,14 @@ int _mmc_detect_card_removed(struct mmc_host *host)
 			}
 			pr_debug("%s: card remove detected\n",
 					mmc_hostname(host));
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+			pr_err("TQY: %s: card remove detected\n",
+					mmc_hostname(host));
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
+			ST_LOG("<%s> %s: card remove detected\n",
+					__func__, mmc_hostname(host));
 		}
 	}
 
@@ -4569,8 +4618,18 @@ void mmc_rescan(struct work_struct *work)
 			host->ops->get_cd(host) == 0) {
 		mmc_power_off(host);
 		mmc_release_host(host);
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+		pr_err("TQY: %s: card is not present\n",mmc_hostname(host));
+#endif
 		goto out;
 	}
+#ifdef HQ_FACTORY_BUILD
+	else
+		pr_err("TQY:%s: %s card is present\n", mmc_hostname(host), __func__);
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
+
 	mmc_rescan_try_freq(host, host->f_min);
 	host->err_stats[MMC_ERR_CMD_TIMEOUT] = 0;
 	mmc_release_host(host);

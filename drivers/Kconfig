@@ -212,4 +212,8 @@ source "drivers/sensors/Kconfig"
 
 source "drivers/tee/Kconfig"
 
+source "drivers/samsung/Kconfig"
+
+source "drivers/afc/Kconfig"
+
 endmenu

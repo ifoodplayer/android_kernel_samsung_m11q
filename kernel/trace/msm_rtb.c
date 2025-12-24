@@ -30,6 +30,8 @@
 #include <asm/timex.h>
 #include <soc/qcom/minidump.h>
 
+#include <linux/sec_debug.h>
+
 #define SENTINEL_BYTE_1 0xFF
 #define SENTINEL_BYTE_2 0xAA
 #define SENTINEL_BYTE_3 0xFF
@@ -344,3 +346,38 @@ static void __exit msm_rtb_exit(void)
 }
 module_init(msm_rtb_init)
 module_exit(msm_rtb_exit)
+
+#ifdef CONFIG_SEC_DEBUG_SUMMARY
+#define __set_rtb_state_info(name, member)				\
+	apss->iolog.rtb_state.name.size = sizeof(msm_rtb.member);	\
+	apss->iolog.rtb_state.name.offset =				\
+			offsetof(struct msm_rtb_state, member)
+#define __set_rtb_entry_info(name, member)				\
+	apss->iolog.rtb_entry.name.size =				\
+			sizeof(((struct msm_rtb_layout *)0)->member);	\
+	apss->iolog.rtb_entry.name.offset =				\
+			offsetof(struct msm_rtb_layout, member)
+
+void sec_debug_summary_set_rtb_info(struct sec_debug_summary_data_apss *apss)
+{
+	apss->iolog.rtb_state_pa = (uint64_t)virt_to_phys(&msm_rtb);
+
+	__set_rtb_state_info(rtb_phys, phys);
+	__set_rtb_state_info(nentries, nentries);
+	__set_rtb_state_info(size, size);
+	__set_rtb_state_info(enabled, enabled);
+	__set_rtb_state_info(initialized, initialized);
+	__set_rtb_state_info(step_size, step_size);
+
+	apss->iolog.rtb_entry.struct_size = sizeof(struct msm_rtb_layout);
+	__set_rtb_entry_info(log_type, log_type);
+	__set_rtb_entry_info(idx, idx);
+	__set_rtb_entry_info(caller, caller);
+	__set_rtb_entry_info(data, data);
+	__set_rtb_entry_info(timestamp, timestamp);
+	__set_rtb_entry_info(cycle_count, cycle_count);
+
+	apss->iolog.rtb_pcpu_idx_pa = virt_to_phys(&msm_rtb_idx_cpu);
+
+}
+#endif /* CONFIG_SEC_DEBUG_SUMMARY */

@@ -80,5 +80,8 @@ OBJCOPYFLAGS_lkdtm_rodata_objcopy.o := \
 targets += lkdtm_rodata.o lkdtm_rodata_objcopy.o
 $(obj)/lkdtm_rodata_objcopy.o: $(obj)/lkdtm_rodata.o FORCE
 	$(call if_changed,objcopy)
+# huaqin added by tangqingyong for HS60-53 at 20190718 start
+obj-y                           += huaqin/
+# huaqin added by tangqingyong for HS60-53 at 20190718 end
 
 obj-$(CONFIG_OKL4_LINK_SHBUF)    += okl4-link-shbuf.o

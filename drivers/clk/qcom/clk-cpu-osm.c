@@ -229,6 +229,8 @@ static int clk_cpu_set_rate(struct clk_hw *hw, unsigned long rate,
 	/* Make sure the write goes through before proceeding */
 	clk_osm_mb(parent);
 
+	sec_smem_clk_osm_add_log_l3(rate);
+
 	return 0;
 }
 
@@ -712,6 +714,9 @@ osm_cpufreq_target_index(struct cpufreq_policy *policy, unsigned int index)
 	struct clk_osm *c = policy->driver_data;
 
 	osm_set_index(c, index);
+
+	sec_smem_clk_osm_add_log_cpufreg(policy, index, clk_hw_get_name(&c->hw));
+
 	return 0;
 }
 

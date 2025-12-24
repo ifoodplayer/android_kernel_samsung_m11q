@@ -313,7 +313,9 @@ ifeq ($(CONFIG_USE_OF),y)
 KBUILD_DTBS := dtbs
 endif
 
-DTSSUBDIR	:= qcom
+# HS60 code added by tangqingyong for HS60-2098 at 20191016 start
+DTSSUBDIR	:= samsung
+# HS60 code added by tangqingyong for HS60-2098 at 20191016 end
 
 all:	$(KBUILD_IMAGE) $(KBUILD_DTBS)
 

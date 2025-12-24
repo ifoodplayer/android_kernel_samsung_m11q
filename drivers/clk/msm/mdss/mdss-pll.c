@@ -24,7 +24,17 @@
 #include "mdss-pll.h"
 #include "mdss-dsi-pll.h"
 #include "mdss-hdmi-pll.h"
-
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 start*/
+enum {
+	UNKNOWN_PANEL,
+	HLT_JD9365D_720P_VIDEO_PANEL ,
+	LS_ILI9881C_720P_VIDEO_PANEL,
+	GX_ST7703_720P_VIDEO_PANEL,
+	TXD_HX8394F_720P_VIDEO_PANEL,
+	GX_HSD_ST7703_720P_VIDEO_PANEL
+	};
+extern int mdss_mdp_parse_panel_id_kernel(void);
+/*HS60 code for HS60-384 by wangqilin at 2019/08/12 end*/
 int mdss_pll_resource_enable(struct mdss_pll_resources *pll_res, bool enable)
 {
 	int rc = 0;
@@ -227,7 +237,7 @@ static int mdss_pll_probe(struct platform_device *pdev)
 	struct resource *dynamic_pll_base_reg;
 	struct resource *gdsc_base_reg;
 	struct mdss_pll_resources *pll_res;
-
+	int panel_id = UNKNOWN_PANEL;
 	if (!pdev->dev.of_node) {
 		pr_err("MDSS pll driver only supports device tree probe\n");
 		rc = -ENOTSUPP;
@@ -257,7 +267,14 @@ static int mdss_pll_probe(struct platform_device *pdev)
 
 	pll_res->ssc_en = of_property_read_bool(pdev->dev.of_node,
 						"qcom,dsi-pll-ssc-en");
-
+	/*HS60 code for HS60-384 by wangqilin at 2019/08/21 start*/
+	panel_id	= mdss_mdp_parse_panel_id_kernel();
+	if(HLT_JD9365D_720P_VIDEO_PANEL == panel_id || GX_ST7703_720P_VIDEO_PANEL == panel_id
+		|| GX_HSD_ST7703_720P_VIDEO_PANEL == panel_id){
+		pll_res->ssc_en = false;
+		pr_info("%s: PLL SSC disabled for panel_id:%d\n",__func__,panel_id);
+	}
+	/*HS60 code for HS60-384 by wangqilin at 2019/08/21 start*/
 	if (pll_res->ssc_en) {
 		pr_info("%s: label=%s PLL SSC enabled\n", __func__, label);
 

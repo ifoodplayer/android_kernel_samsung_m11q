@@ -212,3 +212,14 @@ config USB_UAS
 	  say 'Y' or 'M' here and the kernel will use the right driver.
 
 	  If you compile this driver as a module, it will be named uas.
+
+config USB_STORAGE_DETECT
+	boolean "USB storage detect function"
+	depends on USB && SCSI
+	depends on USB_STORAGE
+	help
+	  This feature enables to detect inserting or removing
+          sd card in sd reader device.
+          This must to be defined in /usb/storage/Kconfig 
+          directory originally. But this feature is defined
+          in this Kconfig to gather samsung feature about usb host.

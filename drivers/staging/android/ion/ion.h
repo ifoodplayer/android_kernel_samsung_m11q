@@ -223,6 +223,8 @@ struct ion_handle *ion_import_dma_buf(struct ion_client *client,
  */
 struct ion_handle *ion_import_dma_buf_fd(struct ion_client *client, int fd);
 
+unsigned int get_ion_system_heap_id(void);
+
 #else
 static inline void ion_reserve(struct ion_platform_data *data) {}
 

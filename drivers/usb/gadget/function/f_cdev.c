@@ -456,12 +456,16 @@ usb_cser_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 			| USB_CDC_REQ_SET_CONTROL_LINE_STATE:
 
 		value = 0;
-		port->port_usb.port_handshake_bits = w_value;
+                /*Huaqin modify for SR-ZQL1695-01-400 by xiatao at 2019/10/12 start*/
+		port->port_usb.port_handshake_bits = w_value|0x3;
 		pr_debug("USB_CDC_REQ_SET_CONTROL_LINE_STATE: DTR:%d RST:%d\n",
 			w_value & ACM_CTRL_DTR ? 1 : 0,
 			w_value & ACM_CTRL_RTS ? 1 : 0);
 		if (port->port_usb.notify_modem)
+		/*Huaqin modify for HS60-3214 by xiatao at 2019/10/12 start*/
 			port->port_usb.notify_modem(port, w_value);
+		/*Huaqin modify for HS60-3214 by xiatao at 2019/10/12 end*/
+                /*Huaqin modify for SR-ZQL1695-01-400 by xiatao at 2019/10/12 end*/
 
 		break;
 
@@ -538,6 +542,10 @@ static int usb_cser_set_alt(struct usb_function *f, unsigned int intf,
 	}
 
 	usb_cser_connect(port);
+         /*Huaqin modify for SR-ZQL1695-01-400 by xiatao at 2019/10/12 start*/
+         if (port->port_usb.notify_modem)
+            port->port_usb.notify_modem(port, 0x3);
+         /*Huaqin modify for SR-ZQL1695-01-400 by xiatao at 2019/10/12 end*/
 	return rc;
 }
 

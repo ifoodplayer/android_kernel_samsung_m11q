@@ -53,6 +53,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/almk.h>
 #include <linux/show_mem_notifier.h>
+#include <linux/ratelimit.h>
 
 #ifdef CONFIG_HIGHMEM
 #define _ZONE ZONE_HIGHMEM
@@ -70,6 +71,9 @@
 /* to enable lowmemorykiller */
 static int enable_lmk = 1;
 module_param_named(enable_lmk, enable_lmk, int, 0644);
+static uint32_t lmk_count;
+static int lmkd_count;
+static int lmkd_cricount;
 
 static u32 lowmem_debug_level = 1;
 static short lowmem_adj[6] = {
@@ -126,19 +130,6 @@ void handle_lmk_event(struct task_struct *selected, int selected_tasksize,
 	int tail;
 	struct lmk_event *events;
 	struct lmk_event *event;
-	int res;
-	char taskname[MAX_TASKNAME];
-
-	res = get_cmdline(selected, taskname, MAX_TASKNAME - 1);
-
-	/* No valid process name means this is definitely not associated with a
-	 * userspace activity.
-	 */
-
-	if (res <= 0 || res >= MAX_TASKNAME)
-		return;
-
-	taskname[res] = '\0';
 
 	spin_lock(&lmk_event_lock);
 
@@ -154,7 +145,7 @@ void handle_lmk_event(struct task_struct *selected, int selected_tasksize,
 	events = (struct lmk_event *) event_buffer.buf;
 	event = &events[head];
 
-	memcpy(event->taskname, taskname, res + 1);
+	strncpy(event->taskname, selected->comm, MAX_TASKNAME);
 
 	event->pid = selected->pid;
 	event->uid = from_kuid_munged(current_user_ns(), task_uid(selected));
@@ -243,6 +234,51 @@ static void lmk_event_init(void)
 	entry = proc_create("lowmemorykiller", 0, NULL, &event_file_ops);
 	if (!entry)
 		pr_err("error creating kernel lmk event file\n");
+}
+
+static void show_memory(void)
+{
+#define K(x) ((x) << (PAGE_SHIFT - 10))
+	printk("Mem-Info:"
+		" totalram_pages:%lukB"
+		" free:%lukB"
+		" active_anon:%lukB"
+		" inactive_anon:%lukB"
+		" active_file:%lukB"
+		" inactive_file:%lukB"
+		" unevictable:%lukB"
+		" isolated(anon):%lukB"
+		" isolated(file):%lukB"
+		" dirty:%lukB"
+		" writeback:%lukB"
+		" mapped:%lukB"
+		" shmem:%lukB"
+		" slab_reclaimable:%lukB"
+		" slab_unreclaimable:%lukB"
+		" kernel_stack:%lukB"
+		" pagetables:%lukB"
+		" free_cma:%lukB"
+		"\n",
+		K(totalram_pages),
+		K(global_page_state(NR_FREE_PAGES)),
+		K(global_node_page_state(NR_ACTIVE_ANON)),
+		K(global_node_page_state(NR_INACTIVE_ANON)),
+		K(global_node_page_state(NR_ACTIVE_FILE)),
+		K(global_node_page_state(NR_INACTIVE_FILE)),
+		K(global_node_page_state(NR_UNEVICTABLE)),
+		K(global_node_page_state(NR_ISOLATED_ANON)),
+		K(global_node_page_state(NR_ISOLATED_FILE)),
+		K(global_node_page_state(NR_FILE_DIRTY)),
+		K(global_node_page_state(NR_WRITEBACK)),
+		K(global_node_page_state(NR_FILE_MAPPED)),
+		K(global_node_page_state(NR_SHMEM)),
+		K(global_page_state(NR_SLAB_RECLAIMABLE)),
+		K(global_page_state(NR_SLAB_UNRECLAIMABLE)),
+		global_page_state(NR_KERNEL_STACK_KB),
+		K(global_page_state(NR_PAGETABLE)),
+		K(global_page_state(NR_FREE_CMA_PAGES))
+		);
+#undef K
 }
 
 static unsigned long lowmem_count(struct shrinker *s,
@@ -610,9 +646,19 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free;
 	int other_file;
+	static DEFINE_RATELIMIT_STATE(lmk_rs, DEFAULT_RATELIMIT_INTERVAL, 1);
+#if defined(CONFIG_SWAP)
+	unsigned long swap_orig_nrpages;
+	unsigned long swap_comp_nrpages;
+	int swap_rss;
+	int selected_swap_rss;
+
+	swap_orig_nrpages = get_swap_orig_data_nrpages();
+	swap_comp_nrpages = get_swap_comp_pool_nrpages();
+#endif
 
 	if (!mutex_trylock(&scan_mutex))
-		return 0;
+		return SHRINK_STOP;
 
 	other_free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
 
@@ -651,7 +697,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		lowmem_print(5, "lowmem_scan %lu, %x, return 0\n",
 			     sc->nr_to_scan, sc->gfp_mask);
 		mutex_unlock(&scan_mutex);
-		return 0;
+		return SHRINK_STOP;;
 	}
 
 	selected_oom_score_adj = min_score_adj;
@@ -660,6 +706,31 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	for_each_process(tsk) {
 		struct task_struct *p;
 		short oom_score_adj;
+
+    /*  Huaqin add for HS60-1449 by lingyuguo at 2019/09/12 start */
+    #if defined(HQ_FACTORY_BUILD)
+    if(tsk->comm){
+		if((strstr(tsk->comm,"huaqin.factory")!=NULL)){
+			 lowmem_print(1,"===========lowmemorykiller jump kill huaqin.factory =================== \n");
+			 continue;
+        /*Huaqin add for HS60-2805 by miaozhenxing at 2019/11/04 start*/
+        }else if((strstr(tsk->comm,"om.val.hardware")!=NULL)){
+            lowmem_print(1,"===========lowmemorykiller jump kill om.val.hardware =================== \n");
+            continue;
+        }else if((strstr(tsk->comm,"lcomm.telephony")!=NULL)){
+            lowmem_print(1,"===========lowmemorykiller jump kill lcomm.telephony =================== \n");
+            continue;
+        }else if((strstr(tsk->comm,"com.yha.runtime")!=NULL)){
+            lowmem_print(1,"===========lowmemorykiller jump kill com.yha.runtime =================== \n");
+            continue;
+        }else if((strstr(tsk->comm,"QMESA_64")!=NULL) || (strstr(tsk->comm,"QMESA_32")!=NULL)){
+            lowmem_print(1,"===========lowmemorykiller jump kill QMESA =================== \n");
+            continue;
+        }
+        /*Huaqin add for HS60-2805 by miaozhenxing at 2019/11/04 end*/
+    }
+    #endif
+    /*  Huaqin add for HS60-1449 by lingyuguo at 2019/09/12end */
 
 		if (tsk->flags & PF_KTHREAD)
 			continue;
@@ -682,7 +753,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 					task_unlock(p);
 					rcu_read_unlock();
 					mutex_unlock(&scan_mutex);
-					return 0;
+					return SHRINK_STOP;
 				}
 			}
 		} else {
@@ -691,7 +762,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 				if (test_task_lmk_waiting(tsk)) {
 					rcu_read_unlock();
 					mutex_unlock(&scan_mutex);
-					return 0;
+					return SHRINK_STOP;
 				}
 
 			p = find_lock_task_mm(tsk);
@@ -705,6 +776,14 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			continue;
 		}
 		tasksize = get_mm_rss(p->mm);
+#if defined(CONFIG_SWAP)
+		swap_rss = get_mm_counter(p->mm, MM_SWAPENTS) *
+				swap_comp_nrpages / swap_orig_nrpages;
+		lowmem_print(3, "%s tasksize rss: %d swap_rss: %d swap: %lu/%lu\n",
+			     __func__, tasksize, swap_rss, swap_comp_nrpages,
+			     swap_orig_nrpages);
+		tasksize += swap_rss;
+#endif
 		task_unlock(p);
 		if (tasksize <= 0)
 			continue;
@@ -717,6 +796,9 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		}
 		selected = p;
 		selected_tasksize = tasksize;
+#if defined(CONFIG_SWAP)
+		selected_swap_rss = swap_rss;
+#endif
 		selected_oom_score_adj = oom_score_adj;
 		lowmem_print(3, "select '%s' (%d), adj %hd, size %d, to kill\n",
 			     p->comm, p->pid, oom_score_adj, tasksize);
@@ -725,6 +807,9 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		long cache_size = other_file * (long)(PAGE_SIZE / 1024);
 		long cache_limit = minfree * (long)(PAGE_SIZE / 1024);
 		long free = other_free * (long)(PAGE_SIZE / 1024);
+#if defined(CONFIG_SWAP)
+		int orig_tasksize = selected_tasksize - selected_swap_rss;
+#endif
 
 		if (test_task_lmk_waiting(selected) &&
 		    (test_task_state(selected, TASK_UNINTERRUPTIBLE))) {
@@ -733,7 +818,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 				     selected->pid);
 			rcu_read_unlock();
 			mutex_unlock(&scan_mutex);
-			return 0;
+			return SHRINK_STOP;
 		}
 
 		task_lock(selected);
@@ -749,7 +834,11 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		task_unlock(selected);
 		trace_lowmemory_kill(selected, cache_size, cache_limit, free);
 		lowmem_print(1, "Killing '%s' (%d) (tgid %d), adj %hd,\n"
+#if defined(CONFIG_SWAP)
+			"to free %ldkB (%ldKB %ldKB) on behalf of '%s' (%d) because\n"
+#else
 			"to free %ldkB on behalf of '%s' (%d) because\n"
+#endif
 			"cache %ldkB is below limit %ldkB for oom score %hd\n"
 			"Free memory is %ldkB above reserved.\n"
 			"Free CMA is %ldkB\n"
@@ -759,7 +848,13 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			"GFP mask is 0x%x\n",
 			selected->comm, selected->pid, selected->tgid,
 			selected_oom_score_adj,
+#if defined(CONFIG_SWAP)
 			selected_tasksize * (long)(PAGE_SIZE / 1024),
+			orig_tasksize * (long)(PAGE_SIZE / 1024),
+			selected_swap_rss * (long)(PAGE_SIZE / 1024),
+#else
+			selected_tasksize * (long)(PAGE_SIZE / 1024),
+#endif
 			current->comm, current->pid,
 			cache_size, cache_limit,
 			min_score_adj,
@@ -773,6 +868,11 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			(long)(PAGE_SIZE / 1024),
 			sc->gfp_mask);
 
+		show_mem_extra_call_notifiers();
+		show_memory();
+		if ((selected_oom_score_adj <= 100) && (__ratelimit(&lmk_rs)))
+			dump_tasks(NULL, NULL);
+
 		if (lowmem_debug_level >= 2 && selected_oom_score_adj == 0) {
 			show_mem(SHOW_MEM_FILTER_NODES);
 			show_mem_call_notifiers();
@@ -781,8 +881,9 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 
 		lowmem_deathpending_timeout = jiffies + HZ;
 		rem += selected_tasksize;
-		rcu_read_unlock();
 		get_task_struct(selected);
+		rcu_read_unlock();
+		lmk_count++;
 		/* give the system time to free up the memory */
 		msleep_interruptible(20);
 		trace_almk_shrink(selected_tasksize, ret,
@@ -801,6 +902,9 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		handle_lmk_event(selected, selected_tasksize, min_score_adj);
 		put_task_struct(selected);
 	}
+	if (!rem)
+		rem = SHRINK_STOP;
+
 	return rem;
 }
 
@@ -912,5 +1016,7 @@ module_param_array_named(adj, lowmem_adj, short, &lowmem_adj_size, 0644);
 module_param_array_named(minfree, lowmem_minfree, uint, &lowmem_minfree_size,
 			 S_IRUGO | S_IWUSR);
 module_param_named(debug_level, lowmem_debug_level, uint, S_IRUGO | S_IWUSR);
+module_param_named(lmkcount, lmk_count, uint, 0444);
 module_param_named(lmk_fast_run, lmk_fast_run, int, S_IRUGO | S_IWUSR);
-
+module_param_named(lmkd_count, lmkd_count, int, 0644);
+module_param_named(lmkd_cricount, lmkd_cricount, int, 0644);

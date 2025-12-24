@@ -57,6 +57,8 @@
 
 #include "tick-internal.h"
 
+#include <linux/sec_debug.h>
+
 /*
  * The timer bases:
  *
@@ -1227,7 +1229,9 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 */
 	raw_spin_unlock(&cpu_base->lock);
 	trace_hrtimer_expire_entry(timer, now);
+	sec_debug_msg_log("hrtimer %pS entry", fn);
 	restart = fn(timer);
+	sec_debug_msg_log("hrtimer %pS exit", fn);
 	trace_hrtimer_expire_exit(timer);
 	raw_spin_lock(&cpu_base->lock);
 

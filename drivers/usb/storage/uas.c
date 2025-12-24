@@ -792,32 +792,13 @@ static int uas_target_alloc(struct scsi_target *starget)
 	return 0;
 }
 
+//HS60 code add by tangqingyong for P191125-00477 at 20191206 start
 static int uas_slave_alloc(struct scsi_device *sdev)
 {
 	struct uas_dev_info *devinfo =
 		(struct uas_dev_info *)sdev->host->hostdata;
-	int maxp;
 
 	sdev->hostdata = devinfo;
-
-	/*
-	 * We have two requirements here. We must satisfy the requirements
-	 * of the physical HC and the demands of the protocol, as we
-	 * definitely want no additional memory allocation in this path
-	 * ruling out using bounce buffers.
-	 *
-	 * For a transmission on USB to continue we must never send
-	 * a package that is smaller than maxpacket. Hence the length of each
-         * scatterlist element except the last must be divisible by the
-         * Bulk maxpacket value.
-	 * If the HC does not ensure that through SG,
-	 * the upper layer must do that. We must assume nothing
-	 * about the capabilities off the HC, so we use the most
-	 * pessimistic requirement.
-	 */
-
-	maxp = usb_maxpacket(devinfo->udev, devinfo->data_in_pipe, 0);
-	blk_queue_virt_boundary(sdev->request_queue, maxp - 1);
 
 	/*
 	 * The protocol has no requirements on alignment in the strict sense.
@@ -833,6 +814,7 @@ static int uas_slave_alloc(struct scsi_device *sdev)
 
 	return 0;
 }
+//HS60 code add by tangqingyong for P191125-00477 at 20191206 end
 
 static int uas_slave_configure(struct scsi_device *sdev)
 {

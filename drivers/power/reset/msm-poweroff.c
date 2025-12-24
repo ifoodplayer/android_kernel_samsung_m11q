@@ -35,6 +35,8 @@
 #include <soc/qcom/watchdog.h>
 #include <soc/qcom/minidump.h>
 
+#include <linux/sec_debug.h>
+
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
 #define EMERGENCY_DLOAD_MAGIC3    0x77777777
@@ -50,7 +52,17 @@
 #define SCM_DLOAD_BOTHDUMPS	(SCM_DLOAD_MINIDUMP | SCM_DLOAD_FULLDUMP)
 
 static int restart_mode;
-static void *restart_reason;
+
+#ifdef CONFIG_SEC_DEBUG
+/* This variable is updated in sec_debug
+ because device_initcall might be called too late to use this
+ when any expection occurs in the early stage of bootup.
+ */
+extern void __iomem *restart_reason;
+#else
+static void __iomem *restart_reason;
+#endif
+
 static bool scm_pmic_arbiter_disable_supported;
 static bool scm_deassert_ps_hold_supported;
 /* Download mode master kill-switch */
@@ -141,7 +153,10 @@ static int scm_set_dload_mode(int arg1, int arg2)
 				&desc);
 }
 
-static void set_dload_mode(int on)
+#ifndef CONFIG_SEC_DEBUG
+static
+#endif
+void set_dload_mode(int on)
 {
 	int ret;
 
@@ -158,6 +173,10 @@ static void set_dload_mode(int on)
 		pr_err("Failed to set secure DLOAD mode: %d\n", ret);
 
 	dload_mode_enabled = on;
+
+#ifdef CONFIG_SEC_DEBUG
+	pr_err("set_dload_mode <%d> ( %lx )\n", on, CALLER_ADDR0);
+#endif
 }
 
 static bool get_dload_mode(void)
@@ -165,6 +184,7 @@ static bool get_dload_mode(void)
 	return dload_mode_enabled;
 }
 
+#ifndef CONFIG_SEC_DEBUG
 static void enable_emergency_dload_mode(void)
 {
 	int ret;
@@ -191,6 +211,7 @@ static void enable_emergency_dload_mode(void)
 	if (ret)
 		pr_err("Failed to set secure EDLOAD mode: %d\n", ret);
 }
+#endif
 
 static int dload_set(const char *val, const struct kernel_param *kp)
 {
@@ -284,6 +305,7 @@ static void msm_restart_prepare(const char *cmd)
 {
 	bool need_warm_reset = false;
 #ifdef CONFIG_QCOM_DLOAD_MODE
+#ifndef CONFIG_SEC_DEBUG
 	/* Write download mode flags if we're panic'ing
 	 * Write download mode flags if restart_mode says so
 	 * Kill download mode if master-kill switch is set
@@ -291,8 +313,12 @@ static void msm_restart_prepare(const char *cmd)
 
 	set_dload_mode(download_mode &&
 			(in_panic || restart_mode == RESTART_DLOAD));
+#else
+	sec_debug_update_dload_mode(restart_mode, in_panic);
+#endif
 #endif
 
+#ifndef CONFIG_SEC_DEBUG
 	if (qpnp_pon_check_hard_reset_stored()) {
 		/* Set warm reset as true when device is in dload mode */
 		if (get_dload_mode() ||
@@ -306,6 +332,9 @@ static void msm_restart_prepare(const char *cmd)
 
 	if (force_warm_reboot)
 		pr_info("Forcing a warm reset of the system\n");
+#else
+	need_warm_reset = get_dload_mode();
+#endif
 
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (force_warm_reboot || need_warm_reset)
@@ -363,13 +392,16 @@ static void msm_restart_prepare(const char *cmd)
 				__raw_writel(0x6f656d00 | (code & 0xff),
 					     restart_reason);
 			}
+#ifndef CONFIG_SEC_DEBUG
 		} else if (!strncmp(cmd, "edl", 3)) {
 			enable_emergency_dload_mode();
+#endif
 		} else {
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
 
+	sec_debug_update_restart_reason(cmd, in_panic, restart_mode);
 	flush_cache_all();
 
 	/*outer_flush_all is not supported by 64bit kernel*/
@@ -574,6 +606,19 @@ static struct attribute_group reset_attr_group = {
 };
 #endif
 
+#ifdef CONFIG_SEC_DEBUG
+static int dload_mode_normal_reboot_handler(struct notifier_block *nb,
+		unsigned long l, void *p)
+{
+	set_dload_mode(0);
+	return 0;
+}
+
+static struct notifier_block dload_reboot_block = {
+	.notifier_call = dload_mode_normal_reboot_handler
+};
+#endif
+
 static int msm_restart_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -586,6 +631,9 @@ static int msm_restart_probe(struct platform_device *pdev)
 		scm_dload_supported = true;
 
 	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
+#ifdef CONFIG_SEC_DEBUG
+	register_reboot_notifier(&dload_reboot_block);
+#endif
 	np = of_find_compatible_node(NULL, NULL, DL_MODE_PROP);
 	if (!np) {
 		pr_err("unable to find DT imem DLOAD mode node\n");

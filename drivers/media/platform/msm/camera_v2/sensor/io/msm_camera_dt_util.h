@@ -51,6 +51,12 @@ int msm_camera_power_up(struct msm_camera_power_ctrl_t *ctrl,
 	enum msm_camera_device_type_t device_type,
 	struct msm_camera_i2c_client *sensor_i2c_client);
 
+/*HS60 code for HS60-1598 by zhangpeng at 2019/09/16 start*/
+int msm_gc2375h_power_up(struct msm_camera_power_ctrl_t *ctrl,
+	enum msm_camera_device_type_t device_type,
+	struct msm_camera_i2c_client *sensor_i2c_client);
+/*HS60 code for HS60-1598 by zhangpeng at 2019/09/16 end*/
+
 int msm_camera_power_down(struct msm_camera_power_ctrl_t *ctrl,
 	enum msm_camera_device_type_t device_type,
 	struct msm_camera_i2c_client *sensor_i2c_client);

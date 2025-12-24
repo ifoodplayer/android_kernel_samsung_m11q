@@ -70,13 +70,13 @@ static long ratelimit_pages = 32;
 /*
  * Start background writeback (via writeback threads) at this percentage
  */
-int dirty_background_ratio = 10;
+int dirty_background_ratio;
 
 /*
  * dirty_background_bytes starts at 0 (disabled) so that it is a function of
  * dirty_background_ratio * the amount of dirtyable memory
  */
-unsigned long dirty_background_bytes;
+unsigned long dirty_background_bytes = 25 * 1024 * 1024;
 
 /*
  * free highmem will not be subtracted from the total free memory
@@ -87,13 +87,14 @@ int vm_highmem_is_dirtyable;
 /*
  * The generator of dirty data starts writeback at this percentage
  */
-int vm_dirty_ratio = 20;
+int vm_dirty_ratio;
 
 /*
  * vm_dirty_bytes starts at 0 (disabled) so that it is a function of
  * vm_dirty_ratio * the amount of dirtyable memory
  */
-unsigned long vm_dirty_bytes;
+/* IOPP-dirty_buffer-v1.0.4.4 */
+unsigned long vm_dirty_bytes = 50 * 1024 * 1024;
 
 /*
  * The interval between `kupdate'-style writebacks
@@ -1559,6 +1560,9 @@ static inline void wb_dirty_limits(struct dirty_throttle_control *dtc)
  * If we're over `background_thresh' then the writeback threads are woken to
  * perform some writeout.
  */
+
+SIO_PATCH_VERSION(prevent_infinite_writeback, 1, 0, "");
+
 static void balance_dirty_pages(struct address_space *mapping,
 				struct bdi_writeback *wb,
 				unsigned long pages_dirtied)
@@ -1777,6 +1781,17 @@ pause:
 					  period,
 					  pause,
 					  start_time);
+
+		/* IOPP-prevent_infinite_writeback-v1.0.4.4 */
+		/* Do not sleep if the backing device is removed */
+		if (unlikely(!bdi->dev))
+			return;
+
+		/* Collecting approximate value. No lock required. */
+		bdi->last_thresh = thresh;
+		bdi->last_nr_dirty = dirty;
+		bdi->paused_total += pause;
+
 		__set_current_state(TASK_KILLABLE);
 		io_schedule_timeout(pause);
 

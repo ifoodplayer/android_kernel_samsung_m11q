@@ -768,6 +768,65 @@ static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 	return 0;
 }
 
+static struct ion_system_heap *system_heap;
+
+unsigned int get_ion_system_heap_id(void)
+{
+	if (system_heap)
+		return system_heap->heap.id;
+	return -ENODEV;
+}
+
+void show_ion_system_heap_pool_size_locked(struct seq_file *s)
+{
+	unsigned long uncached_total = 0;
+	unsigned long cached_total = 0;
+	unsigned long secure_total = 0;
+	struct ion_page_pool *pool;
+	int i, j;
+
+	if (!system_heap) {
+		pr_err("system_heap_pool is not ready\n");
+		return;
+	}
+
+	for (i = 0; i < num_orders; i++) {
+		pool = system_heap->uncached_pools[i];
+		uncached_total += (1 << pool->order) * PAGE_SIZE *
+			pool->high_count;
+		uncached_total += (1 << pool->order) * PAGE_SIZE *
+			pool->low_count;
+	}
+
+	for (i = 0; i < num_orders; i++) {
+		pool = system_heap->cached_pools[i];
+		cached_total += (1 << pool->order) * PAGE_SIZE *
+			pool->high_count;
+		cached_total += (1 << pool->order) * PAGE_SIZE *
+			pool->low_count;
+	}
+
+	for (i = 0; i < num_orders; i++) {
+		for (j = 0; j < VMID_LAST; j++) {
+			if (!is_secure_vmid_valid(j))
+				continue;
+			pool = system_heap->secure_pools[j][i];
+			secure_total += (1 << pool->order) * PAGE_SIZE *
+					 pool->high_count;
+			secure_total += (1 << pool->order) * PAGE_SIZE *
+					 pool->low_count;
+		}
+	}
+
+	if (s)
+		seq_printf(s, "SystemHeapPool: %8lu kB\n",
+			   (uncached_total + cached_total + secure_total)
+			   >> 10);
+	else
+		pr_cont("SystemHeapPool:%lukB ",
+			(uncached_total + cached_total + secure_total) >> 10);
+}
+
 static void ion_system_heap_destroy_pools(struct ion_page_pool **pools)
 {
 	int i;
@@ -804,6 +863,24 @@ static int ion_system_heap_create_pools(struct device *dev,
 err_create_pool:
 	ion_system_heap_destroy_pools(pools);
 	return 1;
+}
+
+void show_ion_system_heap_size(struct seq_file *s)
+{
+	struct ion_heap *heap;
+	unsigned long system_byte = 0;
+
+	if (!system_heap) {
+		pr_err("system_heap is not ready\n");
+		return;
+	}
+
+	heap = &system_heap->heap;
+	system_byte = (unsigned int)atomic_read(&heap->total_allocated);
+	if (s)
+		seq_printf(s, "SystemHeap:     %8lu kB\n", system_byte >> 10);
+	else
+		pr_cont("SystemHeap:%lukB ", system_byte >> 10);
 }
 
 struct ion_heap *ion_system_heap_create(struct ion_platform_heap *data)
@@ -848,6 +925,10 @@ struct ion_heap *ion_system_heap_create(struct ion_platform_heap *data)
 	mutex_init(&heap->split_page_mutex);
 
 	heap->heap.debug_show = ion_system_heap_debug_show;
+	if (!system_heap)
+		system_heap = heap;
+	else
+		pr_err("system_heap had been already created\n");
 	return &heap->heap;
 
 err_create_cached_pools:

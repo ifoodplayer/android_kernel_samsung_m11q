@@ -554,6 +554,11 @@ static int qusb_phy_init(struct usb_phy *phy)
 				qphy->base + QUSB2PHY_PORT_TUNE5);
 
 	/* ensure above writes are completed before re-enabling PHY */
+	pr_debug("%s():qyd read tune1 = 0x%02x tune2 = 0x%02x tune3 = 0x%02x tune4 = 0x%02x\n",__func__,
+	readl_relaxed(qphy->base + QUSB2PHY_PORT_TUNE1),
+	readl_relaxed(qphy->base + QUSB2PHY_PORT_TUNE2),
+	readl_relaxed(qphy->base + QUSB2PHY_PORT_TUNE3),
+	readl_relaxed(qphy->base + QUSB2PHY_PORT_TUNE4));
 	wmb();
 
 	/* Enable the PHY */

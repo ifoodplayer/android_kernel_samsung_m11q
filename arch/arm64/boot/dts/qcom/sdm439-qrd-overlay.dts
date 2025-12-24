@@ -18,5 +18,5 @@
 
 / {
 	model = "QRD";
-	qcom,board-id = <0xb 2>;
+	qcom,board-id = <0xb 0>;
 };

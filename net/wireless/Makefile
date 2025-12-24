@@ -19,7 +19,15 @@ CFLAGS_trace.o := -I$(src)
 
 ccflags-y += -D__CHECK_ENDIAN__
 
-$(obj)/regdb.c: $(src)/db.txt $(src)/genregdb.awk
+ifeq ($(shell expr $(PRODUCT_SHIPPING_API_LEVEL) \>= 29),1)
+DB_VERSION = 17
+else ifeq ($(shell expr $(PRODUCT_SHIPPING_API_LEVEL) \>= 28),1)
+DB_VERSION = 16
+else
+DB_VERSION = 13
+endif
+
+$(obj)/regdb.c: $(src)/db.txt_v$(DB_VERSION) $(src)/genregdb.awk
 	@$(AWK) -f $(srctree)/$(src)/genregdb.awk < $< > $@
 
 clean-files := regdb.c

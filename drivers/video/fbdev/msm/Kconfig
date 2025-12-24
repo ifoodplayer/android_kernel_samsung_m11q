@@ -144,4 +144,13 @@ config FB_MSM_MDSS_FRC_DEBUG
 	statistics and check whether its output pattern matches expected
 	cadence.
 
+config LCD_SORTING
+	bool "LCD SORTING"
+	help
+	  Say Y here if you have a Elan CHIPSET touchscreen.
+	  ELAN controllers are multi touch controllers which can
+	  report 10 touches at a time.
+
+		  If unusre, say N.
+
 endif

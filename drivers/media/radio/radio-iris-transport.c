@@ -29,6 +29,7 @@
 #include <linux/workqueue.h>
 #include <soc/qcom/smd.h>
 #include <media/radio-iris.h>
+#include <linux/wakelock.h>
 #include <linux/uaccess.h>
 
 struct radio_data {

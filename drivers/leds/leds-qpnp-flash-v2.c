@@ -1892,6 +1892,12 @@ static inline u8 get_vph_droop_thresh_code(u32 val_mv)
 	return (val_mv / 100) - 25;
 }
 
+/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 start*/
+static struct qpnp_flash_led *samsung_flash_led=NULL;
+struct led_classdev *led_cdev_samsung_torch;
+struct led_classdev *led_cdev_samsung_switch;
+/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 end*/
+
 static int qpnp_flash_led_parse_each_led_dt(struct qpnp_flash_led *led,
 			struct flash_node_data *fnode, struct device_node *node)
 {
@@ -2117,6 +2123,29 @@ static int qpnp_flash_led_parse_each_led_dt(struct qpnp_flash_led *led,
 			}
 		}
 	}
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 start*/
+    samsung_flash_led=led;
+	#ifdef CONFIG_MSM_CAMERA_HS70ADDNODE
+	if(!strncmp(fnode->cdev.name, "led:torch_1", strlen("led:torch_1")))
+	{
+		pr_err("testledtype add led:torch_1 is ok\n");
+		led_cdev_samsung_torch=&(fnode->cdev);
+	}
+	#else
+	if(!strncmp(fnode->cdev.name, "led:torch_0", strlen("led:torch_0")))
+	{
+		pr_err("testledtype add led:torch_0 is ok\n");
+		led_cdev_samsung_torch=&(fnode->cdev);
+	}
+	#endif
+	#if 0
+	if(!strncmp(fnode->cdev.name, "led:torch_1", strlen("led:torch_1")))
+	{
+		pr_err("chengzhi add led:torch_1 is ok\n");
+		led_cdev_samsung_torch=&(fnode->cdev);
+	}
+	#endif
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 end*/
 
 	return 0;
 }
@@ -2213,9 +2242,128 @@ static int qpnp_flash_led_parse_and_register_switch(struct qpnp_flash_led *led,
 			return PTR_ERR(snode->gpio_state_suspend);
 		}
 	}
+	#ifdef CONFIG_MSM_CAMERA_HS70ADDNODE
+	if (!strncmp(snode->cdev.name, "led:switch_1", strlen("led:switch_1")))
+	{
+		pr_err("testledtype add led:switch_1 is ok\n");
+        led_cdev_samsung_switch=&(snode->cdev);
+    }
+	#else
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 start*/
+	if (!strncmp(snode->cdev.name, "led:switch_0", strlen("led:switch_0")))
+	{
+		pr_err("testledtype add led:switch_0 is ok\n");
+        led_cdev_samsung_switch=&(snode->cdev);
+    }
+	#endif
+	#if 0
+	if (!strncmp(snode->cdev.name, "led:switch_1", strlen("led:switch_1")))
+	{
+		pr_err("chengzhi add led:switch_1 is ok\n");
+        led_cdev_samsung_switch=&(snode->cdev);
+    }
+	#endif
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 end*/
 
 	return 0;
 }
+
+/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 start*/
+struct class *samsung_torch_class;
+struct device *samsung_torch_dev1;
+int samsung_level1=0;
+static ssize_t samsung_show1(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", samsung_level1);
+}
+static ssize_t samsung_store1(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t len)
+{
+	u8 set_torch_strength=0;
+	u8 get_torch_strength=0;
+
+	if (kstrtoint(buf, 0, &samsung_level1))
+	{
+		pr_err("testledtype add the torch stength error");
+		return -EINVAL;
+	}
+	switch(samsung_level1)
+    {
+        case 1001:
+			set_torch_strength=0x01;
+            break;
+        case 1002:
+			set_torch_strength=0x03;
+            break;
+        case 1003:
+			set_torch_strength=0x05;
+            break;
+		case 1004:
+        case 1005:
+			set_torch_strength=0x07;
+            break;
+		case 1006:
+        case 1007:
+		case 1008:
+		case 1009:
+			set_torch_strength=0x09;
+            break;
+        default:
+		samsung_level1=0;
+            break;
+    }
+	if(0==samsung_level1)
+	{
+		qpnp_flash_led_brightness_set(led_cdev_samsung_switch,0);
+		/*
+		qpnp_flash_led_brightness_set(led_cdev_samsung_torch,0);
+		qpnp_flash_led_brightness_set(led_cdev_samsung_switch,1);
+		*/
+		return len;
+	}
+	#ifdef CONFIG_MSM_CAMERA_HS70ADDNODE
+	qpnp_flash_led_read(samsung_flash_led,0xd344,&get_torch_strength);
+	#else
+	qpnp_flash_led_read(samsung_flash_led,0xd343,&get_torch_strength);
+	#endif
+	#if 0
+	qpnp_flash_led_read(samsung_flash_led,0xd344,&get_torch_strength);
+	#endif
+	pr_err("testledtype add get torch no initial value:%d",get_torch_strength);
+	if(0x00==get_torch_strength)
+	{
+		qpnp_flash_led_brightness_set(led_cdev_samsung_switch,0);
+		qpnp_flash_led_brightness_set(led_cdev_samsung_torch,100);
+		qpnp_flash_led_brightness_set(led_cdev_samsung_switch,1);
+		pr_err("testledtype add set the torch strength inital!:%d",100);
+	}
+	pr_err("testledtype add set torch value:%d",set_torch_strength);
+	#ifdef CONFIG_MSM_CAMERA_HS70ADDNODE
+	qpnp_flash_led_write(samsung_flash_led,0xd344,set_torch_strength);
+	#else
+	qpnp_flash_led_write(samsung_flash_led,0xd343,set_torch_strength);
+	#endif
+	#if 0
+	qpnp_flash_led_write(samsung_flash_led,0xd344,set_torch_strength);
+	#endif
+	return len;
+}
+static DEVICE_ATTR(rear_flash, 0644, samsung_show1, samsung_store1);
+static DEVICE_ATTR(rear_torch_flash, 0644, samsung_show1, samsung_store1);
+static void create_torch_node(void)
+{
+    samsung_torch_class=class_create(THIS_MODULE, "camera");
+    samsung_torch_dev1=device_create(samsung_torch_class, NULL, 0, NULL, "flash");
+
+	if (device_create_file(samsung_torch_dev1, &dev_attr_rear_flash) < 0 ||device_create_file(samsung_torch_dev1, &dev_attr_rear_torch_flash) < 0)
+	{
+		device_destroy(samsung_torch_class, 0);
+		class_destroy(samsung_torch_class);
+	}
+}
+/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 end*/
 
 static int get_code_from_table(int *table, int len, int value)
 {
@@ -2821,6 +2969,10 @@ static int qpnp_flash_led_probe(struct platform_device *pdev)
 	spin_lock_init(&led->lock);
 
 	dev_set_drvdata(&pdev->dev, led);
+
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 start*/
+	create_torch_node();
+	/* HS60 code for SR-ZQL1695-01-308 by chengzhi at 2019/11/17 end*/
 
 	return 0;
 

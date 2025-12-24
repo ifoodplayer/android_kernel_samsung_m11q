@@ -410,7 +410,7 @@ static int eeprom_parse_memory_map(struct msm_eeprom_ctrl_t *e_ctrl,
 				memptr += eeprom_map->mem_settings[i].reg_data;
 			}
 			break;
-
+/* HS60 code for HS60-01000000517 modify hi556 otp reading by huangjiwu at 2019/08/03 start */
 			case MSM_CAM_READ_LOOP: {
 				e_ctrl->i2c_client.addr_type =
 				 eeprom_map->mem_settings[i].addr_type;
@@ -419,8 +419,6 @@ static int eeprom_parse_memory_map(struct msm_eeprom_ctrl_t *e_ctrl,
 					gc < eeprom_map->mem_settings[i].
 						reg_data;
 					gc++) {
-					msleep(eeprom_map->mem_settings[i].
-						delay);
 					rc = e_ctrl->i2c_client.i2c_func_tbl->
 						i2c_read(
 						&(e_ctrl->i2c_client),
@@ -437,9 +435,10 @@ static int eeprom_parse_memory_map(struct msm_eeprom_ctrl_t *e_ctrl,
 					*memptr = (uint8_t)gc_read;
 					memptr++;
 				}
+				msleep(eeprom_map->mem_settings[i].delay);
 			}
 			break;
-
+/* HS60 code for HS60-01000000517 modify hi556 otp reading by huangjiwu at 2019/08/03 end */
 			default:
 				pr_err("%s: %d Invalid i2c operation LC:%d, op: %d\n",
 					__func__, __LINE__, i,

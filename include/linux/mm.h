@@ -1226,6 +1226,26 @@ void zap_page_range(struct vm_area_struct *vma, unsigned long address,
 		unsigned long size, struct zap_details *);
 void unmap_vmas(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
 		unsigned long start, unsigned long end);
+/*
+ * This has to be called after a get_task_mm()/mmget_not_zero()
+ * followed by taking the mmap_sem for writing before modifying the
+ * vmas or anything the coredump pretends not to change from under it.
+ *
+ * NOTE: find_extend_vma() called from GUP context is the only place
+ * that can modify the "mm" (notably the vm_start/end) under mmap_sem
+ * for reading and outside the context of the process, so it is also
+ * the only case that holds the mmap_sem for reading that must call
+ * this function. Generally if the mmap_sem is hold for reading
+ * there's no need of this check after get_task_mm()/mmget_not_zero().
+ *
+ * This function can be obsoleted and the check can be removed, after
+ * the coredump code will hold the mmap_sem for writing before
+ * invoking the ->core_dump methods.
+ */
+static inline bool mmget_still_valid(struct mm_struct *mm)
+{
+	return likely(!mm->core_state);
+}
 
 /**
  * mm_walk - callbacks for walk_page_range
@@ -2239,7 +2259,7 @@ int write_one_page(struct page *page, int wait);
 void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
-#define VM_MAX_READAHEAD	512	/* kbytes */
+#define VM_MAX_READAHEAD	128	/* kbytes */
 #define VM_MIN_READAHEAD	16	/* kbytes (includes current page) */
 
 int force_page_cache_readahead(struct address_space *mapping, struct file *filp,
@@ -2628,5 +2648,22 @@ extern struct reclaim_param reclaim_task_anon(struct task_struct *task,
 		int nr_to_reclaim);
 #endif
 
+enum memsize_kernel_type {
+	MEMSIZE_KERNEL_KERNEL = 0,
+	MEMSIZE_KERNEL_PAGING,
+	MEMSIZE_KERNEL_LOGBUF,
+	MEMSIZE_KERNEL_PIDHASH,
+	MEMSIZE_KERNEL_VFSHASH,
+	MEMSIZE_KERNEL_MM_INIT,
+	MEMSIZE_KERNEL_OTHERS,
+	MEMSIZE_KERNEL_STOP,
+};
+extern void set_memsize_reserved_name(const char *name);
+extern void unset_memsize_reserved_name(void);
+extern void set_memsize_kernel_type(enum memsize_kernel_type type);
+extern void free_memsize_reserved(phys_addr_t free_base, phys_addr_t free_size);
+extern void record_memsize_reserved(const char *name, phys_addr_t base,
+				    phys_addr_t size, bool nomap,
+				    bool reusable);
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */

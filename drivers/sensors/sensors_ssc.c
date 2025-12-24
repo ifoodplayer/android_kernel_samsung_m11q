@@ -42,6 +42,11 @@
 
 #define QTICK_DIV_FACTOR	0x249F
 
+/*HS60 code for AR-ZQL1695-01000000041 by zhuqiang at 2019/7/24 start*/
+char *sar_name = NULL;
+module_param(sar_name, charp, 0644);
+/*HS60 code for AR-ZQL1695-01000000041 by zhuqiang at 2019/7/24 end*/
+
 struct sns_ssc_control_s {
 	struct class *dev_class;
 	dev_t dev_num;

@@ -2193,6 +2193,33 @@ static int lock_page_maybe_drop_mmap(struct vm_area_struct *vma,
 	return 1;
 }
 
+static noinline void tracing_mark_write(bool start, struct file *file, pgoff_t offset, unsigned int size, bool sync)
+{
+	char buf[256], *path;
+
+	if (!tracing_is_on() || file == NULL || file->f_path.dentry == NULL)
+		return;
+
+	if (start) {
+		path = dentry_path(file->f_path.dentry, buf, 256);
+
+		if (!IS_ERR(path))
+			trace_printk("B|%d|%d , %s , %lu , %d\n", current->pid, sync, path, offset, size);
+		else
+			trace_printk("B|%d|%d , %s , %lu , %d\n", current->pid, sync, "dentry_path failed", offset, size);
+	} else {
+		trace_printk("E|%d\n", current->pid);
+	}
+}
+
+#define trace_fault_file_path_start(...) tracing_mark_write(1, ##__VA_ARGS__)
+#define trace_fault_file_path_end(...) tracing_mark_write(0, ##__VA_ARGS__)
+
+#if CONFIG_MMAP_READAROUND_LIMIT == 0
+int mmap_readaround_limit = VM_MAX_READAHEAD;
+#else
+int mmap_readaround_limit = CONFIG_MMAP_READAROUND_LIMIT;
+#endif
 /*
  * Synchronous readahead happens when we don't even find a page in the page
  * cache at all.  We don't want to perform IO under the mmap sem, so if we have
@@ -2208,6 +2235,7 @@ static struct file *do_sync_mmap_readahead(struct vm_area_struct *vma,
 {
 	struct file *fpin = NULL;
 	struct address_space *mapping = file->f_mapping;
+	unsigned int ra_pages;
 
 	/* If we don't want any read-ahead, don't bother */
 	if (vma->vm_flags & VM_RAND_READ)
@@ -2217,8 +2245,11 @@ static struct file *do_sync_mmap_readahead(struct vm_area_struct *vma,
 
 	if (vma->vm_flags & VM_SEQ_READ) {
 		fpin = maybe_unlock_mmap_for_io(vma, flags, fpin);
+
+		trace_fault_file_path_start(file, offset, ra->ra_pages, 1);
 		page_cache_sync_readahead(mapping, ra, file, offset,
 					  ra->ra_pages);
+		trace_fault_file_path_end(file, offset, ra->ra_pages, 1);
 		return fpin;
 	}
 
@@ -2237,10 +2268,14 @@ static struct file *do_sync_mmap_readahead(struct vm_area_struct *vma,
 	 * mmap read-around
 	 */
 	fpin = maybe_unlock_mmap_for_io(vma, flags, fpin);
-	ra->start = max_t(long, 0, offset - ra->ra_pages / 2);
-	ra->size = ra->ra_pages;
-	ra->async_size = ra->ra_pages / 4;
+	ra_pages = min_t(unsigned int, ra->ra_pages, mmap_readaround_limit);
+	ra->start = max_t(long, 0, offset - ra_pages / 2);
+	ra->size = ra_pages;
+	ra->async_size = ra_pages / 4;
+
+	trace_fault_file_path_start(file, offset, ra_pages, 1);
 	ra_submit(ra, mapping, file);
+	trace_fault_file_path_end(file, offset, ra_pages, 1);
 	return fpin;
 }
 
@@ -2266,8 +2301,11 @@ static struct file *do_async_mmap_readahead(struct vm_area_struct *vma,
 		ra->mmap_miss--;
 	if (PageReadahead(page)) {
 		fpin = maybe_unlock_mmap_for_io(vma, flags, fpin);
+
+		trace_fault_file_path_start(file, offset, ra->ra_pages, 0);
 		page_cache_async_readahead(mapping, ra, file,
 					   page, offset, ra->ra_pages);
+		trace_fault_file_path_end(file, offset, ra->ra_pages, 0);
 	}
 	return fpin;
 }

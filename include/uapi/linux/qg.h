@@ -25,6 +25,13 @@ enum qg {
 	QG_MAX,
 };
 
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+enum {
+	DETECT_BATT_SDM439,
+	DETECT_BATT_SDM450,
+};
+/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
+
 #define QG_BATT_SOC QG_BATT_SOC
 #define QG_CC_SOC QG_CC_SOC
 #define QG_ESR_CHARGE_DELTA QG_ESR_CHARGE_DELTA

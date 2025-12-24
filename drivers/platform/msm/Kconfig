@@ -234,4 +234,10 @@ config MSM_RMNET_BAM
           for routing IP packets within the MSM using
           BAM as a physical transport.
 
+# huaqin add for HQ000001 bringup tps61280 by limengxia at 2019/07/17 start
+config HPUE_DETECT
+	bool "CONFIG_HPUE_DETECT"
+	default n
+# huaqin add for HQ000001 bringup tps61280 by limengxia at 2019/07/17 end
+
 endmenu

@@ -5178,6 +5178,13 @@ int mdss_fb_suspres_panel(struct device *dev, void *data)
 	return rc;
 }
 
+/*HS50 code for HS50-3915 by gaozhengwei at 2020/11/03 start*/
+#ifdef CONFIG_TOUCHSCREEN_HIMAX_HS50
+bool hs50_lcm_vregs_ctrl = false;
+extern void hx_lcm_power_source_ctrl_disable(void);
+#endif
+/*HS50 code for HS50-3915 by gaozhengwei at 2020/11/03 end*/
+
 /*
  * mdss_fb_report_panel_dead() - Sends the PANEL_ALIVE=0 status to HAL layer.
  * @mfd   : frame buffer structure associated with fb device.
@@ -5201,6 +5208,14 @@ void mdss_fb_report_panel_dead(struct msm_fb_data_type *mfd)
 	kobject_uevent_env(&mfd->fbi->dev->kobj,
 		KOBJ_CHANGE, envp);
 	pr_err("Panel has gone bad, sending uevent - %s\n", envp[0]);
+
+/*HS50 code for HS50-3915 by gaozhengwei at 2020/11/03 start*/
+#ifdef CONFIG_TOUCHSCREEN_HIMAX_HS50
+	if (hs50_lcm_vregs_ctrl) {
+		hx_lcm_power_source_ctrl_disable();
+	}
+#endif
+/*HS50 code for HS50-3915 by gaozhengwei at 2020/11/03 end*/
 }
 
 

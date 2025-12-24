@@ -19,6 +19,9 @@
 #include <linux/stringify.h>
 #include <linux/types.h>
 #include <linux/debugfs.h>
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#include <kernel_project_defines.h>
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
 
 #define KHZ_TO_HZ 1000
 
@@ -628,7 +631,13 @@ struct mdss_panel_hdr_properties {
 	/* Blackness level supported by panel */
 	u32 blackness_level;
 };
-
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 start*/
+enum bklt_dcs_ctrl_mode {
+	CTRL_MODE_0X0FFF,
+	CTRL_MODE_0XFF0F,
+	CTRL_MODE_UNKNOWN
+};
+/*HS70 code for HS70-132 by liufurong at 2019/10/10 end*/
 struct mdss_panel_info {
 	u32 xres;
 	u32 yres;
@@ -652,6 +661,25 @@ struct mdss_panel_info {
 	u32 rst_seq[MDSS_DSI_RST_SEQ_LEN];
 	u32 rst_seq_len;
 	u32 vic; /* video identification code */
+
+	/*HS70 code for HS70-132 by liufurong at 2019/10/10 start*/
+	u32 bklt_dcs_ctrl_mode;
+	/*HS70 code for HS70-132 by liufurong at 2019/10/10 end*/
+	/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 start*/
+	u32 reset_delay_vsp_ms;
+	/*HS70 code for SR-ZQL1871-01-94 by wangdeyan at 2019/10/25 start*/
+	/*HS70 code for SR-ZQL1871-01-94 by liufurong at 2019/10/26 start*/
+	bool reset_keephigh;
+	/*HS70 code for SR-ZQL1871-01-94 by liufurong at 2019/10/26 start*/
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+	bool reset_force_pull_low;
+#endif
+/*HS50 code for HS50EU-488 by gaozhengwei at 2020/12/08 end*/
+#ifdef HQ_FACTORY_BUILD
+	bool reload_flag;
+#endif /* HQ_FACTORY_BUILD */
+
 	struct mdss_rect roi;
 	int pwm_pmic_gpio;
 	int pwm_lpg_chan;

@@ -2200,6 +2200,11 @@ static int sdhci_get_cd(struct mmc_host *mmc)
 	/* If polling, assume that the card is always present. */
 	if (host->quirks & SDHCI_QUIRK_BROKEN_CARD_DETECTION)
 		return 1;
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 start
+#ifdef HQ_FACTORY_BUILD
+	pr_err("TQY: %s: card :0x%x\n",mmc_hostname(mmc),sdhci_readl(host, SDHCI_PRESENT_STATE));
+#endif
+// HS60 code added by tangqingyong for HS60-1456 factory debug log at 20190910 end
 
 	/* Host native card detect */
 	return !!(sdhci_readl(host, SDHCI_PRESENT_STATE) & SDHCI_CARD_PRESENT);

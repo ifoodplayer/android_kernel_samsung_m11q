@@ -53,5 +53,11 @@
 
 #define QG_SOC_FULL	10000
 #define BATT_SOC_32BIT	GENMASK(31, 0)
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#define MAX_VFLOAT_ENTRIES		8
+#define MAX_CYCLE_COUNT			0xFFFF
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 
 #endif /* __QG_DEFS_H__ */

@@ -41,6 +41,17 @@ enum {
 	POWER_SUPPLY_STATUS_FULL,
 };
 
+/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named /sys/class/power_supply/battery/charge_type by gaochao at 2019/08/08 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+enum {
+	POWER_SUPPLY_CHARGE_TYPE_UNKNOWN = 0,
+	POWER_SUPPLY_CHARGE_TYPE_NONE,
+	POWER_SUPPLY_CHARGE_TYPE_TRICKLE,
+	POWER_SUPPLY_CHARGE_TYPE_FAST,
+	POWER_SUPPLY_CHARGE_TYPE_TAPER,
+	POWER_SUPPLY_CHARGE_TYPE_SLOW,
+};
+#else
 enum {
 	POWER_SUPPLY_CHARGE_TYPE_UNKNOWN = 0,
 	POWER_SUPPLY_CHARGE_TYPE_NONE,
@@ -48,6 +59,8 @@ enum {
 	POWER_SUPPLY_CHARGE_TYPE_FAST,
 	POWER_SUPPLY_CHARGE_TYPE_TAPER,
 };
+#endif
+/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named /sys/class/power_supply/battery/charge_type by gaochao at 2019/08/08 end */
 
 enum {
 	POWER_SUPPLY_HEALTH_UNKNOWN = 0,
@@ -142,6 +155,41 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_STATUS = 0,
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_HEALTH,
+	/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_BATT_CURRENT_EVENT,
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 end */
+	/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_BATT_MISC_EVENT,
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 end */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_STORE_MODE,
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_BATT_SLATE_MODE,
+	#endif
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 end */
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_BATT_CURRENT_UA_NOW,
+	POWER_SUPPLY_PROP_BATTERY_CYCLE,
+	#endif
+	/* HS60 add for SR-ZQL1695-01-405 by wangzikang at 2019/09/19 end */
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 start*/
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	#if defined(CONFIG_AFC)
+	POWER_SUPPLY_PROP_HV_CHARGER_STATUS,
+	POWER_SUPPLY_PROP_AFC_RESULT,
+	POWER_SUPPLY_PROP_HV_DISABLE,
+	#endif
+	#endif
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 end*/
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_AUTHENTIC,
@@ -290,6 +338,11 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_BATT_PROFILE_VERSION,
 	POWER_SUPPLY_PROP_BATT_FULL_CURRENT,
 	POWER_SUPPLY_PROP_RECHARGE_SOC,
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_PROP_RECHARGE_VBAT,
+	#endif
+	/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 	POWER_SUPPLY_PROP_TOGGLE_STAT,
 	POWER_SUPPLY_PROP_ALLOW_HVDCP3,
 	POWER_SUPPLY_PROP_HVDCP_OPTI_ALLOWED,
@@ -305,6 +358,9 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
 	POWER_SUPPLY_PROP_CC_SOC,
 	POWER_SUPPLY_PROP_QG_VBMS_MODE,
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 start */
+	POWER_SUPPLY_PROP_BATT_ID_ERROR,
+	/*HS60 & HS70 add for HS60-3421 by wangzikang at 2019/10/31 end */
 	POWER_SUPPLY_PROP_REAL_CAPACITY,
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT,
@@ -337,7 +393,60 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_TYPEC,	/* Type-C */
 	POWER_SUPPLY_TYPE_UFP,		/* Type-C UFP */
 	POWER_SUPPLY_TYPE_DFP,		/* TYpe-C DFP */
+	/* HS60 add for SR-ZQL1871-01-299 OTG psy by wangzikang at 2019/10/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	POWER_SUPPLY_TYPE_USB_OTG,	 /* USB OTG */
+	#endif
+	/* HS60 add for SR-ZQL1871-01-299 OTG psy by wangzikang at 2019/10/29 end */
+
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 start*/
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	#if defined(CONFIG_AFC)
+	POWER_SUPPLY_TYPE_AFC,
+	#endif
+	#endif
+	/*HS70 add for HS70-919 enable AFC function by qianyingdong at 2019/11/18 end*/
+
 };
+
+/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+enum batt_current_event_ss {
+       SEC_BAT_CURRENT_EVENT_NONE = 0x00000,                                       /* Default value, nothing will be happen */
+       SEC_BAT_CURRENT_EVENT_AFC = 0x00001,                                        /* Do not use this for HS60 */
+       SEC_BAT_CURRENT_EVENT_CHARGE_DISABLE = 0x00002,                             /* This event is for a head mount VR, It is not need */
+       SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING = 0x00010,	                     /* battery temperature is lower than 18 celsius degree */
+       SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING = 0x00020,                         /* battery temperature is higher than 41 celsius degree */
+       SEC_BAT_CURRENT_EVENT_USB_100MA = 0x00040,                                  /* USB 2.0 device under test is set in unconfigured state, not enumerate */
+       SEC_BAT_CURRENT_EVENT_SLATE = 0x00800,
+};
+#endif
+/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 end */
+
+/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+enum batt_misc_event_ss {
+	BATT_MISC_EVENT_UNDEFINED_RANGE_TYPE = 0x00000001,					/* water detection - not support */
+	BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE = 0x00000004,						/* DCD timeout */
+	BATT_MISC_EVENT_HICCUP_TYPE = 0x00000020,						/* Do not use this for HS60, it happens when water is detected in a interface port */
+	BATT_MISC_EVENT_BATTERY_HEALTH = 0x000F0000,
+};
+#endif
+/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 end */
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#define BATTERY_HEALTH_SHIFT                16
+enum misc_battery_health {
+	BATTERY_HEALTH_UNKNOWN = 0,
+	BATTERY_HEALTH_GOOD,
+	BATTERY_HEALTH_NORMAL,
+	BATTERY_HEALTH_AGED,
+	BATTERY_HEALTH_MAX = BATTERY_HEALTH_AGED,
+
+	/* For event */
+	BATTERY_HEALTH_BAD = 0xF,
+};
+#endif
 
 /* Indicates USB Type-C CC connection status */
 enum power_supply_typec_mode {

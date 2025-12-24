@@ -442,6 +442,90 @@ static const struct qpnp_vadc_map_pt adcmap_100k_104ef_104fb[] = {
 };
 
 /* Voltage to temperature */
+/* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 start */
+static const struct qpnp_vadc_map_pt adcmap_batt_term_pu30_b3435[] = {
+	{1663,	-400},
+	{1639,	-380},
+	{1613,	-360},
+	{1585,	-340},
+	{1555,	-320},
+	{1523,	-300},
+	{1490,	-280},
+	{1454,	-260},
+	{1418,	-240},
+	{1379,	-220},
+	{1339,	-200},
+	{1298,	-180},
+	{1257,	-160},
+	{1214,	-140},
+	{1170,	-120},
+	{1127,	-100},
+	{1083,	 -80},
+	{1039,	 -60},
+	{995,	 -40},
+	{952,	 -20},
+	{909,	   0},
+	{867,	  20},
+	{826,	  40},
+	{786,	  60},
+	{747,	  80},
+	{709,	 100},
+	{672,	 120},
+	{637,	 140},
+	{603,	 160},
+	{571,	 180},
+	{540,	 200},
+	{510,	 220},
+	{482,	 240},
+	{456,	 260},
+	{430,	 280},
+	{406,	 300},
+	{383,	 320},
+	{362,	 340},
+	{341,	 360},
+	{322,	 380},
+	{304,	 400},
+	{287,	 420},
+	{271,	 440},
+	{256,	 460},
+	{242,	 480},
+	{228,	 500},
+	{216,	 520},
+	/* HS60 add for ZQL1693-13 Adjust battery temperature at region [54, 60] by gaochao at 2019/08/26 start */
+	/*
+	{204,	 540},
+	{193,	 560},
+	{182,	 580},
+	{172,	 600},
+	*/
+	{210,	 540},
+	{204,	 560},
+	{199,	 580},
+	{180,	 600},
+	/* HS60 add for ZQL1693-13 Adjust battery temperature at region [54, 60] by gaochao at 2019/08/26 end */
+	{163,	 620},
+	{155,	 640},
+	{146,	 660},
+	{139,	 680},
+	{131,	 700},
+	{125,	 720},
+	{118,	 740},
+	{112,	 760},
+	{107,	 780},
+	{101,	 800},
+	{96,	 820},
+	{91,	 840},
+	{87,	 860},
+	{83,	 880},
+	{79,	 900},
+	{75,	 920},
+	{71,	 940},
+	{68,	 960},
+	{65,	 980},
+
+};
+/* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 end */
+
 static const struct qpnp_vadc_map_pt adcmap_150k_104ef_104fb[] = {
 	{1738,	-40000},
 	{1714,	-35000},
@@ -1610,6 +1694,41 @@ int32_t qpnp_adc_scale_smb_batt_therm(struct qpnp_vadc_chip *chip,
 			&adc_chan_result->physical);
 }
 EXPORT_SYMBOL(qpnp_adc_scale_smb_batt_therm);
+
+/* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 start */
+int32_t qpnp_adc_batt_therm_B3435_pu30(struct qpnp_vadc_chip *chip,
+		int32_t adc_code,
+		const struct qpnp_adc_properties *adc_properties,
+		const struct qpnp_vadc_chan_properties *chan_properties,
+		struct qpnp_vadc_result *adc_chan_result)
+{
+	int64_t batt_thm_voltage = 0;
+
+	if (!chan_properties || !chan_properties->offset_gain_numerator ||
+		!chan_properties->offset_gain_denominator ||
+		!adc_properties ||!adc_chan_result)
+		return -EINVAL;
+
+	/* (code * vref_vadc (1.875V) * 1000) / (scale_code * 1000) */
+	if (adc_code > QPNP_VADC_HC_MAX_CODE)
+		adc_code = 0;
+
+	batt_thm_voltage = (int64_t) adc_code;
+	batt_thm_voltage *= (adc_properties->adc_vdd_reference* 1000);
+	batt_thm_voltage = div64_s64(batt_thm_voltage,
+	adc_properties->full_scale_code * 1000);
+
+	qpnp_adc_map_voltage_temp(
+	adcmap_batt_term_pu30_b3435,
+	ARRAY_SIZE(adcmap_batt_term_pu30_b3435),
+	batt_thm_voltage,
+	&adc_chan_result->physical);
+
+	return 0;
+
+}
+EXPORT_SYMBOL(qpnp_adc_batt_therm_B3435_pu30);
+/* Huaqin add for HS60-37 Configure battery NTC for charging by gaochao at 2019/07/11 end */
 
 int32_t qpnp_adc_scale_therm_pu1(struct qpnp_vadc_chip *chip,
 		int32_t adc_code,

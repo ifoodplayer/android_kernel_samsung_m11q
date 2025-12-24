@@ -839,12 +839,16 @@ static struct pil_reset_ops pil_ops_trusted = {
 	.deinit_image = pil_deinit_image_trusted,
 };
 
+extern void set_wcnss_qmi_timeout(bool val);
+
 static void log_failure_reason(const struct pil_tz_data *d)
 {
 	u32 size;
-	char *smem_reason, reason[MAX_SSR_REASON_LEN];
+	char *smem_reason, reason[MAX_SSR_REASON_LEN], *ptr;
 	const char *name = d->subsys_desc.name;
 
+	ptr = 0;
+	
 	if (d->smem_id == -1)
 		return;
 
@@ -862,6 +866,14 @@ static void log_failure_reason(const struct pil_tz_data *d)
 
 	strlcpy(reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
 	pr_err("%s subsystem failure reason: %s.\n", name, reason);
+	
+        ptr = strstr(reason, "QMI ERROR");
+        if ( ptr )
+        {
+            if (!strncmp(name,"wcnss",5))
+                set_wcnss_qmi_timeout(1);
+        }
+
 }
 
 static int subsys_shutdown(const struct subsys_desc *subsys, bool force_stop)

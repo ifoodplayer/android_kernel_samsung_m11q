@@ -24,6 +24,7 @@
 #include "msm_camera_dt_util.h"
 #include "cam_hw_ops.h"
 #include <media/adsp-shmem-device.h>
+#include <kernel_project_defines.h>
 
 #define V4L2_IDENT_CCI 50005
 #define CCI_I2C_QUEUE_0_SIZE 64
@@ -33,7 +34,15 @@
 #define CYCLES_PER_MICRO_SEC_DEFAULT 4915
 #define CCI_MAX_DELAY 1000000
 
-#define CCI_TIMEOUT msecs_to_jiffies(100)
+/*HS50 code for fix timeout problem by zhudaqian at 2020/12/07 start*/
+/*HS60 code for HS60-1461 by zhangpeng at 2019/09/09 start*/
+#if defined (HUAQIN_KERNEL_PROJECT_HS50)
+#define CCI_TIMEOUT msecs_to_jiffies(1500)
+#else
+#define CCI_TIMEOUT msecs_to_jiffies(1000)
+#endif
+/*HS60 code for HS60-1461 by zhangpeng at 2019/09/09 end*/
+/*HS50 code for fix timeout problem by zhudaqian at 2020/12/07 end*/
 
 /* TODO move this somewhere else */
 #define MSM_CCI_DRV_NAME "msm_cci"

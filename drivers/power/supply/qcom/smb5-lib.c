@@ -27,6 +27,18 @@
 #include "step-chg-jeita.h"
 #include "storm-watch.h"
 #include "schgm-flash.h"
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+#include <linux/afc/afc.h>
+#endif
+#endif
+#ifdef CONFIG_USB_NOTIFY_LAYER
+#include <linux/usb_notify.h>
+#endif
+
+#if defined(CONFIG_TYPEC)
+#include <linux/usb/typec/pdic_core.h>
+#endif
 
 #define smblib_err(chg, fmt, ...)		\
 	pr_err("%s: %s: " fmt, chg->name,	\
@@ -41,6 +53,52 @@
 			pr_debug("%s: %s: " fmt, chg->name,	\
 				__func__, ##__VA_ARGS__);	\
 	} while (0)
+
+
+/* HS60 add for HS60-293 Import main-source ATL battery profile by gaochao at 2019/07/31 start */
+static void smblib_update_chg_info(struct smb_charger *chg)
+{
+	union power_supply_propval info_val = {0,};
+	struct smbchg_info chg_info = {0,};
+
+	if (chg->batt_psy)
+	{
+			power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_CAPACITY, &info_val);
+			chg_info.cap = info_val.intval;
+
+			power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW, &info_val);
+			chg_info.vbat = info_val.intval;
+
+			power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_CURRENT_NOW, &info_val);
+			chg_info.bat_c= info_val.intval;
+
+			power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_TEMP, &info_val);
+			chg_info.bat_t= info_val.intval;
+
+			power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_STATUS, &info_val);
+			chg_info.sts= info_val.intval;
+	}
+
+	if (chg->usb_psy)
+	{
+			power_supply_get_property(chg->usb_psy, POWER_SUPPLY_PROP_VOLTAGE_NOW, &info_val);
+			chg_info.vbus= info_val.intval;
+
+			power_supply_get_property(chg->usb_psy, POWER_SUPPLY_PROP_INPUT_CURRENT_NOW, &info_val);
+			chg_info.usb_c= info_val.intval;
+
+			power_supply_get_property(chg->usb_psy, POWER_SUPPLY_PROP_INPUT_CURRENT_SETTLED, &info_val);
+			chg_info.icl_settled= info_val.intval;
+
+			power_supply_get_property(chg->usb_psy, POWER_SUPPLY_PROP_REAL_TYPE, &info_val);
+			chg_info.chg_type= info_val.intval;
+	}
+
+	smblib_err(chg, "cap=%d, vbat=%d, FCC=%d, bat_temp=%d, status=%d, Vbus=%d, usb_cur=%d, ICL=%d, chg_type=%d\n",
+		chg_info.cap, chg_info.vbat, chg_info.bat_c, chg_info.bat_t, chg_info.sts, chg_info.vbus, chg_info.usb_c, chg_info.icl_settled, chg_info.chg_type);
+}
+/* HS60 add for HS60-293 Import main-source ATL battery profile by gaochao at 2019/07/31 end */
+
 
 #define typec_rp_med_high(chg, typec_mode)			\
 	((typec_mode == POWER_SUPPLY_TYPEC_SOURCE_MEDIUM	\
@@ -168,18 +226,48 @@ static void smblib_notify_extcon_props(struct smb_charger *chg, int id)
 
 static void smblib_notify_device_mode(struct smb_charger *chg, bool enable)
 {
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	struct otg_notify *o_notify = get_otg_notify();
+
+	smblib_dbg(chg, PR_MISC, "enable=%d\n", enable);
+#endif
+
 	if (enable)
 		smblib_notify_extcon_props(chg, EXTCON_USB);
 
 	extcon_set_state_sync(chg->extcon, EXTCON_USB, enable);
+
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	send_otg_notify(o_notify, NOTIFY_EVENT_VBUS, enable);
+#endif
 }
 
 static void smblib_notify_usb_host(struct smb_charger *chg, bool enable)
 {
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	struct otg_notify *o_notify = get_otg_notify();
+
+	cancel_delayed_work_sync(&chg->microb_otg_work);
+
+	if (!o_notify) {
+		schedule_delayed_work(&chg->microb_otg_work,
+					msecs_to_jiffies(1000));
+		smblib_dbg(chg, PR_MISC, "enable=%d, otg_notify not registered yet\n", enable);
+		chg->otg_enable = enable;
+		return;
+	}
+
+	smblib_dbg(chg, PR_MISC, "enable=%d\n", enable);
+#endif
+
 	if (enable)
 		smblib_notify_extcon_props(chg, EXTCON_USB_HOST);
 
 	extcon_set_state_sync(chg->extcon, EXTCON_USB_HOST, enable);
+
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	send_otg_notify(o_notify, NOTIFY_EVENT_HOST, enable);
+#endif
 }
 
 /********************
@@ -511,6 +599,14 @@ static int smblib_set_adapter_allowance(struct smb_charger *chg,
 		}
 	}
 
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	if(chg->afc_sts >= AFC_5V) {
+		allowed_voltage = USBIN_ADAPTER_ALLOW_5V_TO_9V;
+		smblib_err(chg, "smblib_set_adapter_allowance changed to 5V_TO_9V\n");
+	}
+#endif
+#endif
 	rc = smblib_write(chg, USBIN_ADAPTER_ALLOW_CFG_REG, allowed_voltage);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't write 0x%02x to USBIN_ADAPTER_ALLOW_CFG rc=%d\n",
@@ -602,6 +698,42 @@ int smblib_get_prop_from_bms(struct smb_charger *chg,
 	return rc;
 }
 
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+void sec_bat_monitor_work(struct smb_charger *chg)
+{
+	const char *usb_icl_voter, *fcc_voter = NULL;
+
+	usb_icl_voter = get_effective_client(chg->usb_icl_votable);
+	fcc_voter = get_effective_client(chg->fcc_votable);
+
+	pr_info("%s: cable_type:%d, flash_active(%d), afc_sts(%d), usb_icl_votable(%s): %d, fcc_votable(%s): %d\n", __func__,
+		chg->real_charger_type, chg->flash_active, chg->afc_sts,
+		usb_icl_voter ? usb_icl_voter : "None", get_effective_result(chg->usb_icl_votable),
+		fcc_voter ? fcc_voter : "None", get_effective_result(chg->fcc_votable));
+}
+
+void smblib_hvdcp_detect_enable(struct smb_charger *chg, bool enable)
+{
+	int rc;
+	u8 mask;
+
+/*	if (chg->hvdcp_disable || chg->pd_not_supported)
+		return; */
+
+	smblib_err(chg, "smblib_hvdcp_detect_enable: %d\n",enable);
+	mask = HVDCP_AUTH_ALG_EN_CFG_BIT | HVDCP_EN_BIT;
+	rc = smblib_masked_write(chg, USBIN_OPTIONS_1_CFG_REG, mask,
+						enable ? mask : 0);
+	if (rc < 0)
+		smblib_err(chg, "failed to write USBIN_OPTIONS_1_CFG rc=%d\n",
+				rc);
+
+	return;
+}
+#endif
+#endif
+
 int smblib_configure_hvdcp_apsd(struct smb_charger *chg, bool enable)
 {
 	int rc;
@@ -675,6 +807,15 @@ static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 {
 	const struct apsd_result *apsd_result = smblib_get_apsd_result(chg);
 
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	if ((chg->real_charger_type == POWER_SUPPLY_TYPE_AFC) && (apsd_result->pst == POWER_SUPPLY_TYPE_USB_DCP)) {
+		pr_info("%s: Ignore DCP after AFC\n", __func__);
+		return apsd_result;
+	}
+#endif
+#endif
+
 	/* if PD is active, APSD is disabled so won't have a valid result */
 	if (chg->pd_active) {
 		chg->real_charger_type = POWER_SUPPLY_TYPE_USB_PD;
@@ -692,6 +833,585 @@ static const struct apsd_result *smblib_update_usb_type(struct smb_charger *chg)
 					apsd_result->name, chg->pd_active);
 	return apsd_result;
 }
+
+/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 start */
+u32 hq_get_huaqin_pcba_config(void);
+void ss_vbus_control_gpio_init(struct smb_charger *chg);
+
+void hq_usb_thermal_work_init(struct smb_charger *chg)
+{
+	pr_debug("line=%d\n", __LINE__);
+
+	schedule_delayed_work(&chg->usb_thermal_status_change_work, msecs_to_jiffies(USB_TERMAL_START_DETECT_TIME));
+	//ss_vbus_control_gpio_init(chg);
+	//cancel_delayed_work_sync(&chg->usb_thermal_status_change_work);
+}
+
+void hq_usb_thermal_work_init_config(struct smb_charger *chg)
+{
+	if (!chg)
+	{
+		pr_err("[ss]line=%d: ichg is null\n", __LINE__);
+		return;
+	}
+	/* HS60 add for HS60-542 enable thermal work by wangzikang at 2019/09/16 start */
+	hq_usb_thermal_work_init(chg);
+	/* HS60 add for HS60-542 enable thermal work by wangzikang at 2019/09/16 end */
+	pr_debug("[ss]line=%d: ready hq_vbus_control_gpio_init\n", __LINE__);
+}
+/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 end */
+
+void ss_vbus_control_gpio_init(struct smb_charger *chg)
+{
+	int val = 0;
+	int rc = 0;
+
+	val = gpio_get_value(chg->vbus_control_gpio);
+	if (val == DRAW_VBUS_GPIO59_HIGH)
+	{
+		rc = gpio_direction_output(chg->vbus_control_gpio, DRAW_VBUS_GPIO59_LOW);
+		if (rc)
+		{
+			pr_err("[%s]line=%d: failed to pull low vbus_control_gpio\n", __FUNCTION__, __LINE__);
+		}
+		else
+		{
+			pr_debug("[%s]line=%d: Pull low vbus_control_gpio\n", __FUNCTION__, __LINE__);
+		}
+	}
+	else
+	{
+		pr_debug("[%s]line=%d: get vbus_control_gpio gpio val=%d\n", __FUNCTION__, __LINE__, val);
+	}
+}
+
+void ss_vbus_control_gpio_set(struct smb_charger *chg, int set_gpio_val)
+{
+	int val = 0;
+	int rc = 0;
+
+	if (set_gpio_val == DRAW_VBUS_GPIO59_HIGH)
+	{
+		val = gpio_get_value(chg->vbus_control_gpio);
+		if (val == DRAW_VBUS_GPIO59_LOW)
+		{
+			rc = gpio_direction_output(chg->vbus_control_gpio, DRAW_VBUS_GPIO59_HIGH);
+			if (rc)
+			{
+				pr_err("[%s]line=%d: failed to pull high vbus_control_gpio\n", __FUNCTION__, __LINE__);
+			}
+			else
+			{
+				pr_debug("[%s]line=%d: Pull high vbus_control_gpio\n", __FUNCTION__, __LINE__);
+			}
+		}
+		else
+		{
+			pr_debug("[%s]line=%d: keep vbus_control_gpio high=%d\n", __FUNCTION__, __LINE__, val);
+		}
+	}
+	else
+	{
+		val = gpio_get_value(chg->vbus_control_gpio);
+		if (val == DRAW_VBUS_GPIO59_HIGH)
+		{
+			rc = gpio_direction_output(chg->vbus_control_gpio, DRAW_VBUS_GPIO59_LOW);
+			if (rc)
+			{
+				pr_err("[%s]line=%d: failed to pull low vbus_control_gpio\n", __FUNCTION__, __LINE__);
+			}
+			else
+			{
+				pr_debug("[%s]line=%d: Pull low vbus_control_gpio\n", __FUNCTION__, __LINE__);
+			}
+		}
+		else
+		{
+			pr_debug("[%s]line=%d: keep vbus_control_gpio low=%d\n", __FUNCTION__, __LINE__, val);
+		}
+	}
+}
+
+int ss_smblib_get_adc_data(struct smb_charger *chg)
+{
+	int rc = 0;
+	struct qpnp_vadc_result result;
+	int64_t vadc = 0;
+
+	chg->vadc_usb_alert = qpnp_get_vadc(chg->dev, "pm-gpio1");
+	if (IS_ERR(chg->vadc_usb_alert))
+	{
+		pr_err("[%s]line=%d: Error get vadc_usb_alert rc=%d\n", __FUNCTION__, __LINE__, rc);
+		rc = PTR_ERR(chg->vadc_usb_alert);
+		if (rc != -EPROBE_DEFER)
+		{
+			pr_err("[%s]line=%d: Couldn't get chg_alert vadc rc=%d\n", __FUNCTION__, __LINE__, rc);
+		}
+
+		return rc;
+	}
+
+	if (chg->vadc_usb_alert)
+	{
+		/* HS70 add for HS70-250 Set usb thermal by gaochao at 2019/10/28 start */
+		if (chg->distinguish_sdm439_sdm450_others == DETECT_SDM439_PLATFORM)	//HS60
+		{
+			rc = qpnp_vadc_read(chg->vadc_usb_alert, VADC_AMUX1_GPIO_PU2, &result);
+		}
+		else
+		{
+			rc = qpnp_vadc_read(chg->vadc_usb_alert, VADC_AMUX2_GPIO_PU2, &result);
+		}
+		/* HS70 add for HS70-250 Set usb thermal by gaochao at 2019/10/28 end */
+		vadc =  result.physical;
+
+		pr_info("[%s]line=%d: qpnp_vadc_read->usb_alert_voltage=%lld\n", __FUNCTION__, __LINE__, vadc);
+	}
+	else
+	{
+		pr_err("[%s]line=%d: NONE vadc_usb_alert\n", __FUNCTION__, __LINE__);
+		return  -1;
+	}
+
+	return vadc;
+}
+
+void ss_update_usb_connector_state(struct smb_charger *chg)
+{
+	int64_t  phy_voltage = 0;
+
+	phy_voltage = ss_smblib_get_adc_data(chg);
+	if (phy_voltage <= 0)
+	{
+		return;
+	}
+
+	if (phy_voltage  < CHG_ALERT_HOT_NTC_VOLTAFE)	//USB thermal > 70
+	{
+
+		//extcon_set_state_sync(chg->extcon, EXTCON_CHG_USB_DCP, true);
+		ss_vbus_control_gpio_set(chg, DRAW_VBUS_GPIO59_HIGH);
+
+		pr_info("[%s]line=%d: USB connector hot, connect VBUS to GND\n", __FUNCTION__, __LINE__);
+	}
+	/*
+	else if ((phy_voltage >= CHG_ALERT_HOT_NTC_VOLTAFE) && (phy_voltage <= CHG_ALERT_WARM_NTC_VOLTAGE))	//USB thermal [60, 70]
+	{
+		ss_vbus_control_gpio_set(chg, DRAW_VBUS_GPIO59_HIGH);
+
+		printk("[%s]line=%d: USB connector former state is GOOD, now is warm, disconnect VBUS to GND\n", __FUNCTION__, __LINE__);
+	}
+	*/
+	else if ((phy_voltage > CHG_ALERT_WARM_NTC_VOLTAGE))		//USB thermal < 60
+	{
+		//extcon_set_state_sync(chg->extcon, EXTCON_CHG_USB_DCP, false);
+		ss_vbus_control_gpio_set(chg, DRAW_VBUS_GPIO59_LOW);
+
+		pr_info("[%s]line=%d: USB connector temperature is GOOD, disconnect VBUS to GND\n", __FUNCTION__, __LINE__);
+	}
+}
+
+/* HS60 add for HS60-163 Add usb thermal at DVT1 stage by gaochao at 2019/08/23 start */
+void ss_determine_update_usb_connector_state(struct smb_charger *chg)
+{
+	if (!chg)
+	{
+		pr_err("[ss][%s]line=%d: ichg is null\n", __FUNCTION__, __LINE__);
+		return;
+	}
+
+	/* HS70 add for HS70-135 Distinguish HS60 and HS70 charging by gaochao at 2019/10/10 start */
+	if (chg->usb_connector_thermal_enable)
+	{
+		if (chg->vbus_control_gpio_enable)
+		{
+			ss_update_usb_connector_state(chg);
+		}
+	}
+
+	pr_debug("[ss][%s]line=%d: start ss_update_usb_connector_state, usb_connector_thermal_enable=%d, vbus_control_gpio_enable=%d\n",
+			__FUNCTION__, __LINE__, chg->usb_connector_thermal_enable, chg->vbus_control_gpio_enable);
+	/* HS70 add for HS70-135 Distinguish HS60 and HS70 charging by gaochao at 2019/10/10 end */
+}
+/* HS60 add for HS60-163 Add usb thermal at DVT1 stage by gaochao at 2019/08/23 end */
+
+static void ss_usb_thermal_status_change_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work,
+			struct smb_charger, usb_thermal_status_change_work.work);
+
+	pr_debug("[%s]line=%d: detect usb connector temperature every per 60s\n", __FUNCTION__, __LINE__);
+
+	/* HS60 add for HS60-163 Add usb thermal at DVT1 stage by gaochao at 2019/08/23 start */
+	ss_determine_update_usb_connector_state(chg);
+	//ss_update_usb_connector_state(chg);
+	/* HS60 add for HS60-163 Add usb thermal at DVT1 stage by gaochao at 2019/08/23 end */
+
+	/* HS60 add for HS60-293 Import main-source ATL battery profile by gaochao at 2019/07/31 start */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	smblib_update_chg_info(chg);
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+	/* HS60 add for HS60-293 Import main-source ATL battery profile by gaochao at 2019/07/31 end */
+
+	schedule_delayed_work(&chg->usb_thermal_status_change_work, msecs_to_jiffies(USB_TERMAL_DETECT_TIMER));
+}
+/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 end */
+
+
+/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+/* keep battery level at [59%, 70%] for every cycle */
+#define SALE_CODE_STR_LEN		3
+static char sales_code_from_cmdline[SALE_CODE_STR_LEN + 1];
+
+static int __init sales_code_setup(char *str)
+{
+	strlcpy(sales_code_from_cmdline, str,
+			ARRAY_SIZE(sales_code_from_cmdline));
+
+	return 1;
+	}
+__setup("androidboot.sales_code=", sales_code_setup);
+
+bool sales_code_is(char* str)
+{
+	return !strncmp(sales_code_from_cmdline, str,
+			SALE_CODE_STR_LEN + 1);
+}
+/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 start*/
+#define STORE_MODE_FCC 500000
+/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 end*/
+void ss_retail_app_rule(struct smb_charger *chg)
+{
+	union power_supply_propval prop = {0, };
+	int bat_capacity = 0;
+	int rc = 0;
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+	int retail_app_dischg_threshold =0;
+	int retail_app_chg_threshold =0;
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+
+	if (chg)
+	{
+		/* obtain battery capacity */
+		rc = power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_CAPACITY, &prop);
+		if (rc < 0)
+			pr_err("Failed to get battery capacity, rc=%d\n", rc);
+
+		bat_capacity = prop.intval;
+		/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+		/* HS60 add for P200502-00042 by wangzikang at 2020/05/12 start */
+		/*if (sales_code_is("VZW")) {*/
+		if (sales_code_is("VZW") || sales_code_is("VPP")) {
+			pr_err("%s: Sales is VZW or VPP\n", __func__);
+			/* HS60 add for P200502-00042 by wangzikang at 2020/05/12 end */
+			retail_app_dischg_threshold = SS_RETAIL_APP_DISCHG_THRESHOLD_VZW;
+			retail_app_chg_threshold = SS_RETAIL_APP_CHG_THRESHOLD_VZW;
+		} else {
+			retail_app_dischg_threshold = SS_RETAIL_APP_DISCHG_THRESHOLD;
+			retail_app_chg_threshold = SS_RETAIL_APP_CHG_THRESHOLD;
+		}
+		if (bat_capacity >= retail_app_dischg_threshold) {
+		/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+			rc = smblib_set_usb_suspend(chg, true);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't suspend input rc=%d\n", rc);
+
+			printk("[%s]line=%d: retail_app stop usb charging\n", __FUNCTION__, __LINE__);
+		/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+		} else if (bat_capacity < retail_app_chg_threshold) {
+		/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+			rc = smblib_set_usb_suspend(chg, false);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't resume input rc=%d\n", rc);
+
+			printk("[%s]line=%d: retail_app resume usb charging\n", __FUNCTION__, __LINE__);
+		} else
+			printk("[%s]line=%d: retail_app keep previous state\n", __FUNCTION__, __LINE__);
+	} else
+		smblib_err(chg, "[ss]chg is NULL\n");
+
+}
+
+static void ss_retail_app_status_change_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work,
+		struct smb_charger, retail_app_status_change_work.work);
+	/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 start*/
+	int rc=0;
+	/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 end*/
+	pr_info("[%s]line=%d: retail_app run every per 60s, chg->store_mode_ss=%d\n",
+			__FUNCTION__, __LINE__, chg->store_mode_ss);
+
+	/* when store_mode is set as 1, check battery level to charge or discharge */
+	if (chg->store_mode_ss == STORE_MODE_ENABLE_SS)
+	{
+		ss_retail_app_rule(chg);
+		/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 start*/
+		rc = vote(chg->fcc_votable,STORE_MODE_VOTER,true,STORE_MODE_FCC);
+		if(rc < 0)
+			pr_err("Failed to vote STORE_MODE_VOTER, rc=%d\n", rc);
+		/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 end*/
+
+	}
+	/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 start*/
+	else
+	{
+		rc = vote(chg->fcc_votable,STORE_MODE_VOTER,false,STORE_MODE_FCC);
+		if(rc < 0)
+			pr_err("Failed to vote STORE_MODE_VOTER, rc=%d\n", rc);
+	}
+	/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 end*/
+
+	/* update charging status while adapter is present */
+	//smblib_update_chg_info(chg);
+
+	schedule_delayed_work(&chg->retail_app_status_change_work, msecs_to_jiffies(RETAIL_APP_DETECT_TIMER));
+}
+
+void smblib_get_prop_batt_store_mode_samsung(struct smb_charger *chg,
+				union power_supply_propval *val)
+{
+	if (chg)
+	{
+		val->intval = chg->store_mode_ss;
+
+		smblib_dbg(chg, PR_MISC, "[ss]val->intval=%d, chg->store_mode_ss=%d\n", val->intval, chg->store_mode_ss);
+	} else
+		smblib_err(chg, "[ss]chg is NULL\n");
+}
+
+void smblib_set_prop_batt_store_mode_samsung(struct smb_charger *chg,
+				const union power_supply_propval *val)
+{
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+	bool vbus_rising;
+	union power_supply_propval vbus_val = {0, };
+	int rc;
+
+	rc = smblib_get_prop_usb_present(chg, &vbus_val);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't get usb present rc = %d\n", rc);
+	}
+	vbus_rising = vbus_val.intval;
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+
+	if (chg) {
+		chg->store_mode_ss = val->intval;
+
+		smblib_dbg(chg, PR_MISC, "[ss]val->intval=%d, chg->store_mode_ss=%d\n", val->intval, chg->store_mode_ss);
+	} else
+		smblib_err(chg, "[ss]chg is NULL\n");
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+	if(vbus_rising){
+		if(chg->store_mode_ss == 1){
+			printk("Set store mode while usb is present!");
+			schedule_delayed_work(&chg->retail_app_status_change_work, msecs_to_jiffies(RETAIL_APP_START_DETECT_TIME));
+		}else{
+			/* HS60 add for HS70-4387 by wangzikang at 2020/02/25 end */
+			rc = vote(chg->fcc_votable,STORE_MODE_VOTER,false,STORE_MODE_FCC);
+			if(rc < 0)
+				pr_err("Failed to vote STORE_MODE_VOTER, rc=%d\n", rc);
+			/* HS60 add for HS70-4387 by wangzikang at 2020/02/25 end */
+			cancel_delayed_work_sync(&chg->retail_app_status_change_work);
+			printk("Clear store mode while usb is present!");
+		}
+	}
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+}
+#endif
+/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+
+
+/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+static void hq_rerun_apsd_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger, rerun_apsd_work.work);
+
+	int rc = 0;
+	u8 stat = 0;
+	const struct apsd_result *apsd_result = NULL;
+
+	if (chg)
+	{
+			rc = smblib_read(chg, APSD_STATUS_REG, &stat);
+			if (rc < 0)
+			{
+				smblib_err(chg, "Couldn't read APSD_STATUS rc=%d\n", rc);
+			}
+
+			apsd_result = smblib_update_usb_type(chg);
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+			pr_info("line=%d, APSD_STATUS=0x%02x, pst=%d, bit=%d, real_charger_type=%d, typec_mode=%d\n",
+					__LINE__, stat, apsd_result->pst, apsd_result->bit, chg->real_charger_type, chg->typec_mode);
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+
+			switch (apsd_result->pst) {
+			case POWER_SUPPLY_TYPE_USB_DCP:
+				chg->real_charger_type = POWER_SUPPLY_TYPE_USB_DCP;
+
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote USB_PSY_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, DCP_CURRENT_UA);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote SW_ICL_MAX_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				break;
+			case POWER_SUPPLY_TYPE_USB_FLOAT:
+				/* HS60 add for P191120-04834 DCP is detected as float charger by slowly inserting or floating D+ and D- by gaochao at 2019/11/25 start */
+				#if !defined(HQ_FACTORY_BUILD)	//ss version
+				/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+				if ((chg->boot_to_detect_charger == BOOT_TO_DETECT_START) || (chg->boot_to_detect_charger == BOOT_TO_DETECT_SECOND))
+				{
+					chg->boot_to_detect_charger = BOOT_TO_DETECT_MAX;
+				}
+				else
+				{
+					/* HS70 add for P200615-07791 force float charger to sdp to resolve disconnectiong of USB port by gaochao at 2020/07/16 start */
+					chg->real_charger_type = POWER_SUPPLY_TYPE_USB;
+					/* HS70 add for P200615-07791 force float charger to sdp to resolve disconnectiong of USB port by gaochao at 2020/07/16 end */
+				}
+				/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
+				#endif
+				/* HS60 add for P191120-04834 DCP is detected as float charger by slowly inserting or floating D+ and D- by gaochao at 2019/11/25 end */
+
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote USB_PSY_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, SDP_CURRENT_UA);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote SW_ICL_MAX_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				break;
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+			case POWER_SUPPLY_TYPE_USB:
+				/* HS60 add for P191120-04834 DCP is detected as float charger by slowly inserting or floating D+ and D- by gaochao at 2019/11/25 start */
+				#if !defined(HQ_FACTORY_BUILD)	//ss version
+				/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+				if ((chg->boot_to_detect_charger == BOOT_TO_DETECT_START) || (chg->boot_to_detect_charger == BOOT_TO_DETECT_SECOND))
+				{
+					chg->boot_to_detect_charger = BOOT_TO_DETECT_MAX;
+				}
+				else
+				{
+					/* HS70 add for P200615-07791 force float charger to sdp to resolve disconnectiong of USB port by gaochao at 2020/07/16 start */
+					// chg->real_charger_type = POWER_SUPPLY_TYPE_USB_FLOAT;
+					/* HS70 add for P200615-07791 force float charger to sdp to resolve disconnectiong of USB port by gaochao at 2020/07/16 end */
+				}
+				/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
+				#endif
+				/* HS60 add for P191120-04834 DCP is detected as float charger by slowly inserting or floating D+ and D- by gaochao at 2019/11/25 end */
+
+				rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote SW_ICL_MAX_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, true, SDP_CURRENT_UA);
+				if (rc < 0)
+				{
+					pr_err("line=%d: Couldn't vote USB_PSY_VOTER rc=%d\n", __LINE__, rc);
+				}
+
+				break;
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+			default:
+				smblib_err(chg, "Unknown APSD %d; forcing 500mA\n", apsd_result->pst);
+				rc = smblib_set_icl_current(chg, SDP_CURRENT_UA);
+				if (rc < 0)
+				{
+					smblib_err(chg, "Couldn't set ICL options rc=%d\n", rc);
+				}
+
+				break;
+			}
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+			pr_info("line=%d, APSD_STATUS=0x%02x, pst=%d, bit=%d, real_charger_type=%d, typec_mode=%d\n",
+					__LINE__, stat, apsd_result->pst, apsd_result->bit, chg->real_charger_type, chg->typec_mode);
+			/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+
+			//smblib_handle_apsd_done(chg, (bool)(stat & APSD_DTC_STATUS_DONE_BIT));
+			pr_info("line=%d, end hq_rerun_apsd_work\n", __LINE__);
+	}
+	else
+	{
+		smblib_err(chg, "chg is null\n");
+	}
+}
+/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
+
+/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 start */
+static void hq_float_charger_detect_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work,
+		struct smb_charger, float_charger_detect_work.work);
+
+	int rc = 0;
+	int settled_icl = 0;
+
+	if (chg)
+	{
+		rc = smblib_get_charge_param(chg, &chg->param.icl_stat, &settled_icl);
+		if (rc < 0)
+		{
+			smblib_err(chg, "Couldn't get ICL status rc=%d\n", rc);
+			return;
+		}
+
+		/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+		pr_info("line=%d, settled_icl=%d, real_charger_type=%d, typec_mode=%d\n",
+				__LINE__, settled_icl, chg->real_charger_type, chg->typec_mode);
+		/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+		/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+		//if ((settled_icl <= SDP_100_MA) && (chg->real_charger_type == POWER_SUPPLY_TYPE_USB || chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN))
+		if ((settled_icl <= SDP_100_MA) && (chg->real_charger_type == POWER_SUPPLY_TYPE_USB
+			|| chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN || chg->real_charger_type == POWER_SUPPLY_TYPE_USB_FLOAT))
+		/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+		{
+			/*
+			rc = smblib_set_icl_current(chg, SDP_CURRENT_UA);
+			if (rc < 0)
+			{
+				smblib_err(chg, "Couldn't set ICL options rc=%d\n", rc);
+				return;
+			}
+			*/
+			rc = smblib_rerun_apsd_if_required(chg);
+			if (rc < 0)
+			{
+				smblib_err(chg, "smblib_rerun_apsd_if_required error rc=%d\n", rc);
+			}
+
+			cancel_delayed_work_sync(&chg->rerun_apsd_work);
+			schedule_delayed_work(&chg->rerun_apsd_work, msecs_to_jiffies(RERUN_APSD_DETECT_TIME));
+
+			pr_info("line=%d, end float_charger_detect_work, start rerun_apsd_work after %d ms\n",
+					__LINE__, RERUN_APSD_DETECT_TIME);
+			/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
+		}
+	}
+	else
+	{
+		smblib_err(chg, "chg is null\n");
+	}
+}
+/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 end */
 
 static int smblib_notifier_call(struct notifier_block *nb,
 		unsigned long ev, void *v)
@@ -1003,7 +1723,10 @@ int smblib_set_icl_current(struct smb_charger *chg, int icl_ua)
 		 * Micro USB mode follows ICL register independent of override
 		 * bit, configure override only for typeC mode.
 		 */
-		if (chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC)
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+		//if (chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC)
+		if (chg->connector_type == POWER_SUPPLY_CONNECTOR_TYPEC || chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
 			override = true;
 	}
 
@@ -1309,6 +2032,9 @@ int smblib_vbus_regulator_enable(struct regulator_dev *rdev)
 	int rc;
 
 	smblib_dbg(chg, PR_OTG, "enabling OTG\n");
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	pr_info("smblib_vbus_regulator_enable, enabling OTG\n");
+#endif
 
 	rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, OTG_EN_BIT);
 	if (rc < 0) {
@@ -1325,6 +2051,9 @@ int smblib_vbus_regulator_disable(struct regulator_dev *rdev)
 	int rc;
 
 	smblib_dbg(chg, PR_OTG, "disabling OTG\n");
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	pr_info("smblib_vbus_regulator_disable, disabling OTG\n");
+#endif
 
 	rc = smblib_masked_write(chg, DCDC_CMD_OTG_REG, OTG_EN_BIT, 0);
 	if (rc < 0) {
@@ -1381,6 +2110,29 @@ int smblib_get_prop_batt_present(struct smb_charger *chg,
 	return rc;
 }
 
+/* HS60 add for SR-ZQL1695-01000000466 Provide sysFS node named /sys/class/power_supply/battery/online by gaochao at 2019/08/08 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+extern int g_sec_battery_cable_timeout;
+
+void smblib_get_prop_batt_online_samsung(struct smb_charger *chg,
+				union power_supply_propval *val)
+{
+	if (chg) {
+		/* HS60 add for SR-ZQL1695-01000000466 Provide sysFS node named xxx/battery/online by gaochao at 2019/08/14 start */
+		if (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN)
+			val->intval = POWER_SUPPLY_TYPE_BATTERY;
+		else
+			val->intval = chg->real_charger_type;
+
+		smblib_dbg(chg, PR_MISC, "[ss]val->intval=%d, chg->real_charger_type=%d, g_sec_battery_cable_timeout=%d\n",
+			val->intval, chg->real_charger_type, g_sec_battery_cable_timeout);
+		/* HS60 add for SR-ZQL1695-01000000466 Provide sysFS node named xxx/battery/online by gaochao at 2019/08/14 end */
+	} else
+		smblib_err(chg, "[ss]chg is NULL\n");
+}
+#endif
+/* HS60 add for SR-ZQL1695-01000000466 Provide sysFS node named /sys/class/power_supply/battery/online by gaochao at 2019/08/08 end */
+
 int smblib_get_prop_batt_capacity(struct smb_charger *chg,
 				  union power_supply_propval *val)
 {
@@ -1396,6 +2148,80 @@ int smblib_get_prop_batt_capacity(struct smb_charger *chg,
 	return rc;
 }
 
+/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+/*HS60 add for P200214-01131 modify the threshold of current event by wangzikang at 2020/02/14 start*/
+/*#define SS_BAT_LOW_TEMP_SWELLING		180
+#define SS_BAT_HIGH_TEMP_SWELLING		410*/
+#define SS_BAT_LOW_TEMP_SWELLING		120
+#define SS_BAT_HIGH_TEMP_SWELLING		450
+/*HS60 add for P200214-01131 modify the threshold of current event by wangzikang at 2020/02/14 end*/
+extern int g_usb_connected_unconfigured;
+
+void smblib_get_prop_batt_batt_current_event_samsung(struct smb_charger *chg,
+				union power_supply_propval *val)
+{
+	union power_supply_propval prop = {0, };
+	int battery_temperature = 0;
+	int rc = 0;
+	
+	/* initial state */
+	val->intval = SEC_BAT_CURRENT_EVENT_NONE;
+	if (chg) {
+		/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named xxx/battery/batt_current_event by gaochao at 2019/08/14 start */
+        	if (chg->real_charger_type != POWER_SUPPLY_TYPE_UNKNOWN) {
+			/* obtain battery temperature */
+			rc = power_supply_get_property(chg->batt_psy, POWER_SUPPLY_PROP_TEMP, &prop);
+			if (rc < 0)
+				pr_err("Failed to get battery temperature, rc=%d\n", rc);
+			battery_temperature = prop.intval;
+
+			if (battery_temperature <= SS_BAT_LOW_TEMP_SWELLING)
+				val->intval |= SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING;
+			if (battery_temperature >= SS_BAT_HIGH_TEMP_SWELLING)
+				val->intval |= SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING;
+			/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 start */
+			if (chg->slate_mode == 1)
+				val->intval |= SEC_BAT_CURRENT_EVENT_SLATE;
+			/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 end */
+			if (g_usb_connected_unconfigured)
+				val->intval |= SEC_BAT_CURRENT_EVENT_USB_100MA;
+        	}
+		/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named xxx/battery/batt_current_event by gaochao at 2019/08/14 end */
+		smblib_dbg(chg, PR_MISC, "[ss]val->intval=%d, battery_temperature=%d, g_usb_connected_unconfigured=%d, chg->slate_mode=%d\n",
+			val->intval, battery_temperature, g_usb_connected_unconfigured, chg->slate_mode);
+	}else
+		smblib_err(chg, "[ss]chg is NULL\n");
+	
+}
+#endif
+/* HS60 add for SR-ZQL1695-01000000455 Provide sysFS node named /sys/class/power_supply/battery/batt_current_event by gaochao at 2019/08/08 end */
+
+/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+void smblib_get_prop_batt_batt_misc_event_samsung(struct smb_charger *chg,
+				union power_supply_propval *val)
+{
+	val->intval = 0;
+	if (chg) {
+		/* BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE */
+		if (chg->real_charger_type == POWER_SUPPLY_TYPE_USB_FLOAT || g_sec_battery_cable_timeout)
+			val->intval = BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE;
+		val->intval  |= chg->battery_health << BATTERY_HEALTH_SHIFT;
+
+		smblib_dbg(chg, PR_MISC, "[ss]val->intval=%d, g_sec_battery_cable_timeout=%d\n",
+				val->intval, g_sec_battery_cable_timeout);
+	} else
+		smblib_err(chg, "[ss]chg is NULL\n");
+}
+#endif
+/* HS60 add for SR-ZQL1695-01000000460 Provide sysFS node named /sys/class/power_supply/battery/batt_misc_event by gaochao at 2019/08/11 end */
+
+/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#define FLASH_ACTIVE_BATTERY_FULL_LEVEL	100
+#endif
+/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 end */
 int smblib_get_prop_batt_status(struct smb_charger *chg,
 				union power_supply_propval *val)
 {
@@ -1404,7 +2230,13 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 	u8 stat;
 	int rc, suspend = 0;
 
+	/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	if (chg->dbc_usbov || chg->flash_active) {
+	#else
 	if (chg->dbc_usbov) {
+	#endif
+	/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 end */
 		rc = smblib_get_prop_usb_present(chg, &pval);
 		if (rc < 0) {
 			smblib_err(chg,
@@ -1423,8 +2255,34 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 		 * Report charging as long as USBOV is not debounced and
 		 * charging path is un-suspended.
 		 */
+		/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 start */
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		pr_debug("[%s]line=%d, flash_active=%d, dbc_usbov=%d, vbus=%d, suspend=%d, previous_charger_status=%d\n",
+				__FUNCTION__, __LINE__, chg->flash_active, chg->dbc_usbov, pval.intval, suspend, chg->previous_charger_status);
+		#endif
+		/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 end */
+
 		if (pval.intval && !suspend) {
+			/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 start */
+			#if !defined(HQ_FACTORY_BUILD)	//ss version
+			rc = smblib_get_prop_batt_capacity(chg, &pval);
+			if (rc < 0)
+			{
+				smblib_err(chg, "Couldn't get battery level rc=%d\n", rc);
+			}
+
+			if ((pval.intval == FLASH_ACTIVE_BATTERY_FULL_LEVEL) && (chg->previous_charger_status == POWER_SUPPLY_STATUS_FULL))
+			{
+				val->intval = POWER_SUPPLY_STATUS_FULL;
+			}
+			else
+			{
+				val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			}
+			#else
 			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+			#endif
+			/* HS60 add for P191025-06620 Charging popup is coming while camera takes a photo with flash light by gaochao at 2019/11/21 end */
 			return 0;
 		}
 	}
@@ -1521,11 +2379,23 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 	return 0;
 }
 
+/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#define SLOW_CHARGING_CURRENT_STANDARD 400000
+#define SLOW_CHARGING_COUNT  10
+#endif
+/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 end */
+
 int smblib_get_prop_batt_charge_type(struct smb_charger *chg,
 				union power_supply_propval *val)
 {
 	int rc;
 	u8 stat;
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	int settled_icl = 0;
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 end */
 
 	rc = smblib_read(chg, BATTERY_CHARGER_STATUS_1_REG, &stat);
 	if (rc < 0) {
@@ -1548,6 +2418,43 @@ int smblib_get_prop_batt_charge_type(struct smb_charger *chg,
 	default:
 		val->intval = POWER_SUPPLY_CHARGE_TYPE_NONE;
 	}
+
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	rc = smblib_get_charge_param(chg, &chg->param.icl_stat, &settled_icl);
+	if (rc < 0)
+	{
+		smblib_err(chg, "Couldn't get ICL status rc=%d\n", rc);
+		return rc;
+	}
+	/* HS60 add for P191114-09571  by wangzikang at 2019/11/26 start */
+
+	/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 start*/
+	if ((chg->slow_charging_count <= SLOW_CHARGING_COUNT) && (chg->real_charger_type != POWER_SUPPLY_TYPE_UNKNOWN))
+	{
+		chg->slow_charging_count++;
+	}
+	else
+	{
+		chg->slow_charging_count = 0;
+	}
+
+	pr_debug("[ss]slow charging off: settled_icl = %d, Type = %d, slow_charging_count = %d, chg->real_charger_type = %d \n",
+			settled_icl, val->intval, chg->slow_charging_count, chg->real_charger_type);
+	//if (settled_icl < SLOW_CHARGING_CURRENT_STANDARD  && val->intval != POWER_SUPPLY_CHARGE_TYPE_NONE)
+	//if (((settled_icl < SLOW_CHARGING_CURRENT_STANDARD) && !chg->flash_active)  && (val->intval != POWER_SUPPLY_CHARGE_TYPE_NONE))
+	if (((settled_icl < SLOW_CHARGING_CURRENT_STANDARD) && !chg->flash_active)  && (val->intval != POWER_SUPPLY_CHARGE_TYPE_NONE)
+		&& (chg->slow_charging_count > SLOW_CHARGING_COUNT) && (chg->real_charger_type != POWER_SUPPLY_TYPE_UNKNOWN))
+	/* HS60 add for P191114-09571  by wangzikang at 2019/11/26 end */
+	{
+		chg->slow_charging_count = 0;
+		val->intval = POWER_SUPPLY_CHARGE_TYPE_SLOW;
+		smblib_dbg(chg, PR_MISC, "[ss]slow charging on: settled_icl = %d, Type = %d, slow_charging_count = %d, chg->real_charger_type = %d \n",
+			settled_icl, val->intval, chg->slow_charging_count, chg->real_charger_type);
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 end*/
+	}
+	#endif
+	/* HS60 add for SR-ZQL1695-01000000467 Provide sysFS node named xxx/battery/charge_type by gaochao at 2019/08/14 end */
 
 	return rc;
 }
@@ -1684,6 +2591,10 @@ int smblib_set_prop_input_suspend(struct smb_charger *chg,
 		return rc;
 	}
 
+	/*HS60 add for ZQL169XFAC-45 by wangzikang at 2019/11/30 start*/
+	pr_err( "Input_Suspend is : %d.\n" , val->intval);
+	/*HS60 add for ZQL169XFAC-45 by wangzikang at 2019/11/30 start*/
+
 	power_supply_changed(chg->batt_psy);
 	return rc;
 }
@@ -1812,6 +2723,32 @@ int smblib_force_vbus_voltage(struct smb_charger *chg, u8 val)
 	return rc;
 }
 
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+static void smblib_hvdcp_set_fsw(struct smb_charger *chg, int bit)
+{
+	switch (bit) {
+	case QC_5V_BIT:
+		smblib_set_opt_switcher_freq(chg,
+				chg->chg_freq.freq_5V);
+		break;
+	case QC_9V_BIT:
+		smblib_set_opt_switcher_freq(chg,
+				chg->chg_freq.freq_9V);
+		break;
+	case QC_12V_BIT:
+		smblib_set_opt_switcher_freq(chg,
+				chg->chg_freq.freq_12V);
+		break;
+	default:
+		smblib_set_opt_switcher_freq(chg,
+				chg->chg_freq.freq_removal);
+		break;
+	}
+}
+#endif
+#endif
+
 int smblib_dp_dm(struct smb_charger *chg, int val)
 {
 	int target_icl_ua, rc = 0;
@@ -1868,11 +2805,48 @@ int smblib_dp_dm(struct smb_charger *chg, int val)
 			pr_err("Failed to force 5V\n");
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_9V:
-		rc = smblib_force_vbus_voltage(chg, FORCE_9V_BIT);
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		#if defined(CONFIG_AFC)
+		if (chg->hv_disable) {
+			pr_err("%s: DP_DM_FORCE_9V but HV is DISABLE\n", __func__);
+			return -EINVAL;
+		}
+		#endif
+		#endif
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+		#ifdef CONFIG_ARCH_MSM8953
+		if (chg->qc2_unsupported_voltage == QC2_NON_COMPLIANT_9V) {
+				smblib_err(chg, "Couldn't set 9V: unsupported\n");
+				return -EINVAL;
+		}
+		#endif
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
+		/* HS50 add for HS50-4045 resolve protocol conflictation between afc and qc by wenyaqi at 2020/11/02 start */
+		#if defined(CONFIG_AFC)
+		if(chg->afc_sts == AFC_FAIL)
+			rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT);
+		else
+		#endif
+		/* HS50 add for HS50-4045 resolve protocol conflictation between afc and qc by wenyaqi at 2020/11/02 end */
+			rc = smblib_force_vbus_voltage(chg, FORCE_9V_BIT);
 		if (rc < 0)
 			pr_err("Failed to force 9V\n");
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)	
+		schedule_delayed_work(&chg->compliant_check_work,
+			msecs_to_jiffies(2000));
+#endif
+#endif
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_12V:
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+		#ifdef CONFIG_ARCH_MSM8953
+		if (chg->qc2_unsupported_voltage == QC2_NON_COMPLIANT_12V) {
+				smblib_err(chg, "Couldn't set 12V: unsupported\n");
+				return -EINVAL;
+		}
+		#endif
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
 		rc = smblib_force_vbus_voltage(chg, FORCE_12V_BIT);
 		if (rc < 0)
 			pr_err("Failed to force 12V\n");
@@ -2005,8 +2979,10 @@ int smblib_get_prop_usb_online(struct smb_charger *chg,
 		return rc;
 	}
 
-	if (is_client_vote_enabled(chg->usb_icl_votable,
+	/* HS50 add for HS50-1898 Import qcom patch to resolve deadlock by wenyaqi at 2020/9/27 start */
+	if (is_client_vote_enabled_locked(chg->usb_icl_votable,
 					CHG_TERMINATION_VOTER)) {
+	/* HS50 add for HS50-1898 Import qcom patch to resolve deadlock by wenyaqi at 2020/9/27 end */
 		rc = smblib_get_prop_usb_present(chg, val);
 		return rc;
 	}
@@ -2030,6 +3006,19 @@ int smblib_get_prop_usb_voltage_max(struct smb_charger *chg,
 {
 	switch (chg->real_charger_type) {
 	case POWER_SUPPLY_TYPE_USB_HVDCP:
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+		#ifdef CONFIG_ARCH_MSM8953
+		if (chg->qc2_unsupported_voltage == QC2_NON_COMPLIANT_9V) {
+				val->intval = MICRO_5V;
+				break;
+		} else if (chg->qc2_unsupported_voltage ==
+						QC2_NON_COMPLIANT_12V) {
+				val->intval = MICRO_9V;
+				break;
+		}
+		/* else, fallthrough */
+		#endif
+		/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
 	case POWER_SUPPLY_TYPE_USB_HVDCP_3:
 		if (chg->smb_version == PMI632_SUBTYPE)
 			val->intval = MICRO_9V;
@@ -2353,6 +3342,20 @@ static int smblib_handle_usb_current(struct smb_charger *chg,
 						"Couldn't set SDP ICL rc=%d\n",
 						rc);
 
+				/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 start */
+				rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
+				if (rc < 0)
+				{
+					printk("[%s]line=%d: Couldn't vote USB_PSY_VOTER rc=%d\n", __FUNCTION__, __LINE__, rc);
+				}
+
+				rc = vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, SDP_CURRENT_UA);
+				if (rc < 0)
+				{
+					printk("[%s]line=%d: Couldn't vote SW_ICL_MAX_VOTER rc=%d\n", __FUNCTION__, __LINE__, rc);
+				}
+				/* HS70 add for HS70-565 Set float charger ICL as 500mA by gaochao at 2019/10/31 end */
+
 				return rc;
 			}
 
@@ -2462,6 +3465,7 @@ int smblib_set_prop_typec_power_role(struct smb_charger *chg,
 
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
 		return 0;
+	smblib_err(chg, "set power role %d\n", val->intval);
 
 	switch (val->intval) {
 	case POWER_SUPPLY_TYPEC_PR_NONE:
@@ -2482,7 +3486,8 @@ int smblib_set_prop_typec_power_role(struct smb_charger *chg,
 	}
 
 	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG,
-				 TYPEC_POWER_ROLE_CMD_MASK, power_role);
+				TYPEC_POWER_ROLE_CMD_MASK | TYPEC_TRY_MODE_MASK,
+				power_role);
 	if (rc < 0) {
 		smblib_err(chg, "Couldn't write 0x%02x to TYPE_C_INTRPT_ENB_SOFTWARE_CTRL rc=%d\n",
 			power_role, rc);
@@ -2606,6 +3611,32 @@ int smblib_set_prop_pd_in_hard_reset(struct smb_charger *chg,
 
 	return rc;
 }
+
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+int smblib_set_prop_rechg_vbat_thresh(struct smb_charger *chg,
+				const union power_supply_propval *val)
+{
+	int rc;
+	u32 temp = VBAT_TO_VRAW_ADC(val->intval);
+
+	temp = ((temp & 0xFF00) >> 8) | ((temp & 0xFF) << 8);
+	rc = smblib_batch_write(chg,
+		CHGR_ADC_RECHARGE_THRESHOLD_MSB_REG, (u8 *)&temp, 2);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't write to ADC_RECHARGE_THRESHOLD REG rc=%d\n",
+				rc);
+		return rc;
+	}
+
+	chg->auto_recharge_vbat_mv = val->intval;
+	smblib_dbg(chg, PR_MISC, "[ss][%s]line=%d: auto_recharge_vbat_mv=%d, val->intval=%d\n",
+			__FUNCTION__, __LINE__, chg->auto_recharge_vbat_mv, val->intval);
+
+	return rc;
+}
+#endif
+/* HS60 add for SR-ZQL1695-01-357 Import battery aging by gaochao at 2019/08/29 end */
 
 static int smblib_recover_from_soft_jeita(struct smb_charger *chg)
 {
@@ -2876,6 +3907,12 @@ irqreturn_t usbin_uv_irq_handler(int irq, void *data)
 	struct smb_charger *chg = irq_data->parent_data;
 	struct storm_watch *wdata;
 	int rc;
+	/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+	#ifdef CONFIG_ARCH_MSM8953
+	const struct apsd_result *apsd = smblib_get_apsd_result(chg);
+	u8 stat = 0, max_pulses = 0;
+	#endif
+	/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
@@ -2946,8 +3983,124 @@ unsuspend_input:
 
 	wdata = &chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data->storm_data;
 	reset_storm_count(wdata);
+
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+#ifdef CONFIG_ARCH_MSM8953
+	/* Workaround for non-QC2.0-compliant chargers follows */
+	if (!chg->qc2_unsupported_voltage &&
+			apsd->pst == POWER_SUPPLY_TYPE_USB_HVDCP) {
+		rc = smblib_read(chg, QC_CHANGE_STATUS_REG, &stat);
+		if (rc < 0)
+			smblib_err(chg,
+				"Couldn't read CHANGE_STATUS_REG rc=%d\n", rc);
+
+		if (stat & QC_5V_BIT)
+			return IRQ_HANDLED;
+
+		rc = smblib_read(chg, HVDCP_PULSE_COUNT_MAX_REG, &max_pulses);
+		if (rc < 0)
+			smblib_err(chg,
+				"Couldn't read QC2 max pulses rc=%d\n", rc);
+
+		chg->qc2_max_pulses = (max_pulses &
+				HVDCP_PULSE_COUNT_MAX_QC2_MASK);
+
+		if (stat & QC_12V_BIT) {
+			chg->qc2_unsupported_voltage = QC2_NON_COMPLIANT_12V;
+			rc = smblib_masked_write(chg, HVDCP_PULSE_COUNT_MAX_REG,
+					HVDCP_PULSE_COUNT_MAX_QC2_MASK,
+					HVDCP_PULSE_COUNT_MAX_QC2_9V);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't force max pulses to 9V rc=%d\n",
+						rc);
+
+		} else if (stat & QC_9V_BIT) {
+			chg->qc2_unsupported_voltage = QC2_NON_COMPLIANT_9V;
+			rc = smblib_masked_write(chg, HVDCP_PULSE_COUNT_MAX_REG,
+					HVDCP_PULSE_COUNT_MAX_QC2_MASK,
+					HVDCP_PULSE_COUNT_MAX_QC2_5V);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't force max pulses to 5V rc=%d\n",
+						rc);
+
+		}
+
+		rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT,
+				0);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't turn off SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
+					rc);
+
+		smblib_rerun_apsd(chg);
+	}
+#endif
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
+
 	return IRQ_HANDLED;
 }
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+void non_compliant_chg_WA(struct smb_charger *chg){
+	int rc;
+	u8 stat = 0, max_pulses = 0;
+	const struct apsd_result *apsd = smblib_get_apsd_result(chg);
+
+	pr_info("%s: APSD=%s\n", __func__, apsd->name);
+
+	if (!chg->qc2_unsupported_voltage &&
+			apsd->pst == POWER_SUPPLY_TYPE_USB_HVDCP) {
+		rc = smblib_read(chg, QC_CHANGE_STATUS_REG, &stat);
+		if (rc < 0)
+			smblib_err(chg,
+				"Couldn't read CHANGE_STATUS_REG rc=%d\n", rc);
+
+		if (stat & QC_5V_BIT)
+			return;
+
+		rc = smblib_read(chg, HVDCP_PULSE_COUNT_MAX_REG, &max_pulses);
+		if (rc < 0)
+			smblib_err(chg,
+				"Couldn't read QC2 max pulses rc=%d\n", rc);
+
+		chg->qc2_max_pulses = (max_pulses &
+				HVDCP_PULSE_COUNT_MAX_QC2_MASK);
+
+		if (stat & QC_12V_BIT) {
+			chg->qc2_unsupported_voltage = QC2_NON_COMPLIANT_12V;
+			rc = smblib_masked_write(chg, HVDCP_PULSE_COUNT_MAX_REG,
+					HVDCP_PULSE_COUNT_MAX_QC2_MASK,
+					HVDCP_PULSE_COUNT_MAX_QC2_9V);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't force max pulses to 9V rc=%d\n",
+						rc);
+
+		} else if (stat & QC_9V_BIT) {
+			chg->qc2_unsupported_voltage = QC2_NON_COMPLIANT_9V;
+			pr_info("%s: qc2_unsupported_voltage(%d)\n", __func__, chg->qc2_unsupported_voltage);
+			rc = smblib_masked_write(chg, HVDCP_PULSE_COUNT_MAX_REG,
+					HVDCP_PULSE_COUNT_MAX_QC2_MASK,
+					HVDCP_PULSE_COUNT_MAX_QC2_5V);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't force max pulses to 5V rc=%d\n",
+						rc);
+
+		}
+
+		rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT,
+				0);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't turn off SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
+					rc);
+
+		pr_info("%s: qc2_unsupported_voltage : %d \n", __func__, chg->qc2_unsupported_voltage );
+		smblib_rerun_apsd(chg);
+	}
+}
+#endif
+#endif
 
 #define USB_WEAK_INPUT_UA	1400000
 #define ICL_CHANGE_DELAY_MS	1000
@@ -3057,6 +4210,16 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 					vbus_rising ? "attached" : "detached");
 }
 
+/* Huaqin add for P200731-01593 Enable charging while TYPE-C is  default mode by gaochao at 2020/08/10 start */
+enum HS70_NA {
+	HS70_HQ_PCBA_AT_T = 0x5,
+	HS70_HQ_PCBA_Canada = 0x8,
+};
+
+#define PCB_MASK_HQ		0xFF0
+#define PCB_SHIFT_HQ		4
+/* Huaqin add for P200731-01593 Enable charging while TYPE-C is  default mode by gaochao at 2020/08/10 end */
+
 #define PL_DELAY_MS	30000
 void smblib_usb_plugin_locked(struct smb_charger *chg)
 {
@@ -3065,6 +4228,10 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 	bool vbus_rising;
 	struct smb_irq_data *data;
 	struct storm_watch *wdata;
+	/* Huaqin add for P200731-01593 enable charging while Rp-Rp on both CC Pins by gaochao at 2020/08/10 start */
+	u32 pcba_config = 0;
+	pcba_config = hq_get_huaqin_pcba_config();
+	/* Huaqin add for P200731-01593 enable charging while Rp-Rp on both CC Pins by gaochao at 2020/08/10 end */
 
 	rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &stat);
 	if (rc < 0) {
@@ -3090,6 +4257,11 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 		schedule_delayed_work(&chg->pl_enable_work,
 					msecs_to_jiffies(PL_DELAY_MS));
 	} else {
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+		detach_afc();  //related with afc driver
+#endif
+#endif
 		if (chg->wa_flags & BOOST_BACK_WA) {
 			data = chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data;
 			if (data) {
@@ -3140,10 +4312,136 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 			smblib_err(chg, "Couldn't disable DPDM rc=%d\n", rc);
 
 		smblib_update_usb_type(chg);
+		/* Huaqin add for P200731-01593 Enable charging while TYPE-C is default mode by gaochao at 2020/08/10 start */
+		if (chg->distinguish_sdm439_sdm450_others == DETECT_SDM450_PLATFORM)		//HS70
+		{
+			if ((((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HS70_HQ_PCBA_AT_T)
+				|| (((pcba_config & PCB_MASK_HQ) >> PCB_SHIFT_HQ) == HS70_HQ_PCBA_Canada))
+			{
+				pr_info("[%s]line=%d: ignore A11 NA\n", __FUNCTION__, __LINE__);
+			}
+			else
+			{
+				if (chg->use_extcon)
+					smblib_notify_device_mode(chg, false);
+				vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0); //remove USB_PSY voting when plugin detach
+			}
+		}
+		else
+		{
+			/*Huaqin add for Enable Charge while TypeC mode detected as DEFAULT by wangzikang at 2020/07/14 start*/
+			if (chg->use_extcon)
+				smblib_notify_device_mode(chg, false);
+			rc = vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0); //remove USB_PSY voting when plugin detach
+			if (rc < 0)
+			{
+			    pr_err("line=%d: Couldn't vote USB_PSY_VOTER rc=%d\n", __LINE__, rc);
+			}
+			/*Huaqin add for Enable Charge while TypeC mode detected as DEFAULT by wangzikang at 2020/07/14 start*/
+		}
+		/* Huaqin add for P200731-01593 Enable charging while TYPE-C is default mode by gaochao at 2020/08/10 end */
 	}
 
 	if (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
 		smblib_micro_usb_plugin(chg, vbus_rising);
+
+	/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 start */
+	pr_info("[%s]line=%d, vbus_rising=%d\n", __FUNCTION__, __LINE__, vbus_rising);
+	//ss_vbus_control_gpio_init(chg);
+	/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 end */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 start */
+	if(chg->store_mode_ss == STORE_MODE_ENABLE_SS){
+		if (vbus_rising)
+		{
+			pr_info("[%s]line=%d, start retail_app_status_change_work after %d ms\n",
+					__FUNCTION__, __LINE__, RETAIL_APP_START_DETECT_TIME);
+
+			schedule_delayed_work(&chg->retail_app_status_change_work, msecs_to_jiffies(RETAIL_APP_START_DETECT_TIME));
+		}
+		else
+		{
+			pr_info("[%s]line=%d, cancel retail_app_status_change_work\n",
+					__FUNCTION__, __LINE__);
+
+			cancel_delayed_work_sync(&chg->retail_app_status_change_work);
+			/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 start*/
+			rc = vote(chg->fcc_votable,STORE_MODE_VOTER,false,STORE_MODE_FCC);
+			if(rc < 0)
+				pr_err("Failed to vote STORE_MODE_VOTER, rc=%d\n", rc);
+			/*Huaqin added for SR-ZQL1871-01-248 & SR-ZQL1695-01-486 by wangzikang at 2019/10/18 end*/
+		}
+	}
+	/* HS60 add for SR-ZQL1695-01-495 by wangzikang at 2019/10/28 end */
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+
+	/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 start */
+	if (vbus_rising)
+	{
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 start*/
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		chg->slow_charging_count = 0;
+		#endif
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 end*/
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+		pr_info("[%s]line=%d, start float_charger_detect_work after %d ms, rerun_apsd_work after %d ms\n",
+				__FUNCTION__, __LINE__, FLOAT_CHARGER_START_DETECT_TIME, FLOAT_CHARGER_START_DETECT_TIME + RERUN_APSD_DETECT_TIME);
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
+
+		/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		/* HS70 add for HS70-565 remove float_charger_redetect_work by qianyingdong at 2019/1/22 start */
+		/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 start */
+		if (chg->boot_to_detect_charger == BOOT_TO_DETECT_INIT)
+		{
+			schedule_delayed_work(&chg->float_charger_detect_work, msecs_to_jiffies(BOOT_TO_DETECT_FLOAT_CHARGER_START_DETECT_TIME));
+		}
+		else
+		{
+			schedule_delayed_work(&chg->float_charger_detect_work, msecs_to_jiffies(FLOAT_CHARGER_START_DETECT_TIME));
+		}
+
+		pr_info("[%s]line=%d, boot_to_detect_charger=%d\n",
+				__FUNCTION__, __LINE__, chg->boot_to_detect_charger);
+		/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 end */
+		/* HS70 add for HS70-565 remove float_charger_redetect_work by qianyingdong at 2019/1/22 end */
+		#else	//factory
+		schedule_delayed_work(&chg->float_charger_detect_work, msecs_to_jiffies(FLOAT_CHARGER_START_DETECT_TIME));
+		#endif
+		/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
+	}
+	else
+	{
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 start*/
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		chg->slow_charging_count = 0;
+		#endif
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 end*/
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+		pr_info("[%s]line=%d, cancel float_charger_detect_work, cancel rerun_apsd_work\n",
+				__FUNCTION__, __LINE__);
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
+
+		cancel_delayed_work_sync(&chg->float_charger_detect_work);
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+		cancel_delayed_work_sync(&chg->rerun_apsd_work);
+		/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
+	}
+	/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 end */
+	/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chg->boot_to_detect_charger += BOOT_TO_DETECT_STEP;
+	if (chg->boot_to_detect_charger > BOOT_TO_DETECT_MAX)
+	{
+		chg->boot_to_detect_charger = BOOT_TO_DETECT_MAX;
+	}
+
+	pr_info("[%s]line=%d, boot_to_detect_charger=%d\n",
+			__FUNCTION__, __LINE__, chg->boot_to_detect_charger);
+	#endif
+	/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
 
 	power_supply_changed(chg->usb_psy);
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: usbin-plugin %s\n",
@@ -3260,8 +4558,12 @@ static void smblib_handle_hvdcp_check_timeout(struct smb_charger *chg,
 					      bool rising, bool qc_charger)
 {
 	if (rising) {
-
+		
+#if defined(CONFIG_AFC)
+		if (qc_charger && !chg->qc2_unsupported_voltage) {
+#else
 		if (qc_charger) {
+#endif
 			/* enable HDC and ICL irq for QC2/3 charger */
 			vote(chg->usb_irq_enable_votable, QC_VOTER, true, 0);
 			vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true,
@@ -3287,8 +4589,23 @@ static void smblib_handle_hvdcp_detect_done(struct smb_charger *chg,
 
 static void update_sw_icl_max(struct smb_charger *chg, int pst)
 {
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 start */
 	int typec_mode;
 	int rp_ua;
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 end */
+
+	/* HS50 add for SR-QL3095-01-67 Import default charger profile by wenyaqi at 2020/08/03 start */
+	chg->is_dcp = false;
+#if defined(CONFIG_AFC)
+	if (pst == POWER_SUPPLY_TYPE_USB_DCP && chg->real_charger_type != POWER_SUPPLY_TYPE_AFC)
+#else
+	if (pst == POWER_SUPPLY_TYPE_USB_DCP)
+#endif
+	{
+		chg->is_dcp = true;
+	}
+	pr_debug("is_dcp=%d\n", chg->is_dcp);
+	/* HS50 add for SR-QL3095-01-67 Import default charger profile by wenyaqi at 2020/08/03 end */
 
 	/* while PD is active it should have complete ICL control */
 	if (chg->pd_active)
@@ -3300,17 +4617,23 @@ static void update_sw_icl_max(struct smb_charger *chg, int pst)
 	 */
 	if (pst == POWER_SUPPLY_TYPE_USB_HVDCP
 			|| pst == POWER_SUPPLY_TYPE_USB_HVDCP_3
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+			|| (chg->real_charger_type == POWER_SUPPLY_TYPE_AFC)
+#endif
+#endif
 			|| pst == POWER_SUPPLY_TYPE_UNKNOWN)
 		return;
 
 	/* TypeC rp med or high, use rp value */
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 start */
 	typec_mode = smblib_get_prop_typec_mode(chg);
 	if (typec_rp_med_high(chg, typec_mode)) {
 		rp_ua = get_rp_based_dcp_current(chg, typec_mode);
 		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, true, rp_ua);
 		return;
 	}
-
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 end */
 	/* rp-std or legacy, USB BC 1.2 */
 	switch (pst) {
 	case POWER_SUPPLY_TYPE_USB:
@@ -3354,6 +4677,11 @@ static void update_sw_icl_max(struct smb_charger *chg, int pst)
 static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 {
 	const struct apsd_result *apsd_result;
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	int typec_mode, rc = 0;
+#endif
+#endif
 
 	if (!rising)
 		return;
@@ -3376,6 +4704,35 @@ static void smblib_handle_apsd_done(struct smb_charger *chg, bool rising)
 	default:
 		break;
 	}
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	typec_mode = smblib_get_prop_typec_mode(chg);
+
+	if(apsd_result->bit == DCP_CHARGER_BIT && typec_mode == POWER_SUPPLY_TYPEC_SOURCE_DEFAULT) {
+		if ((chg->afc_sts == AFC_INIT) && (!chg->hv_disable)) {
+			/* AFC function call */
+			smblib_dbg(chg, PR_MISC, "Start AFC!!!\n");
+			vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, true, 500000);   /* 500mA for AFC communication  */
+			rc = smblib_set_adapter_allowance(chg,
+					USBIN_ADAPTER_ALLOW_5V_TO_9V);
+			if (rc < 0)
+				smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_TO_9V rc=%d\n",
+					rc);
+
+			if(chg->flash_active)
+				afc_set_voltage(SET_5V);
+			else
+				afc_set_voltage(SET_9V);
+		} else {
+			pr_err("%s: Do not start AFC, afc_sts(%d), hv_disable(%d)\n",
+					__func__, chg->afc_sts, chg->hv_disable);
+			/* afc_sts enum 
+			 * AFC_INIT = 0, NOT_AFC = 1, AFC_FAIL = 2, AFC_DISABLE = 3 */
+		}
+	}
+#endif
+#endif
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: apsd-done rising; %s detected\n",
 		   apsd_result->name);
@@ -3403,6 +4760,10 @@ irqreturn_t usb_source_change_irq_handler(int irq, void *data)
 	}
 	smblib_dbg(chg, PR_REGISTER, "APSD_STATUS = 0x%02x\n", stat);
 
+/* HS70 add for P200302-05335 Remove re-running APSD when micro-usb cable plugged by qianyingdong at 2020/03/02 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+	smblib_dbg(chg, PR_INTERRUPT, "[%s]skip re-runing APSD\n", __func__);
+#else
 	if ((chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB)
 		&& (stat & APSD_DTC_STATUS_DONE_BIT)
 		&& !chg->uusb_apsd_rerun_done) {
@@ -3414,6 +4775,8 @@ irqreturn_t usb_source_change_irq_handler(int irq, void *data)
 		smblib_rerun_apsd_if_required(chg);
 		return IRQ_HANDLED;
 	}
+#endif
+/* HS70 add for P200302-05335 Remove re-running APSD when micro-usb cable plugged by qianyingdong at 2020/03/02 start */
 
 	smblib_handle_apsd_done(chg,
 		(bool)(stat & APSD_DTC_STATUS_DONE_BIT));
@@ -3480,6 +4843,7 @@ static void typec_src_insertion(struct smb_charger *chg)
 	chg->typec_legacy = stat & TYPEC_LEGACY_CABLE_STATUS_BIT;
 	chg->ok_to_pd = (!(chg->typec_legacy || *chg->pd_disabled)
 			|| chg->early_usb_attach) && !chg->pd_not_supported;
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 start */
 	if (!chg->ok_to_pd) {
 		rc = smblib_configure_hvdcp_apsd(chg, true);
 		if (rc < 0) {
@@ -3489,6 +4853,7 @@ static void typec_src_insertion(struct smb_charger *chg)
 		}
 		smblib_rerun_apsd_if_required(chg);
 	}
+	/* HS70 add for HS60-5436 by wangzikang at 2020/03/24 end */
 }
 
 static void typec_sink_removal(struct smb_charger *chg)
@@ -3513,7 +4878,20 @@ static void typec_src_removal(struct smb_charger *chg)
 	if (rc < 0)
 		smblib_err(chg, "Couldn't disable APSD rc=%d\n", rc);
 
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	smblib_hvdcp_detect_enable(chg, false);
+#endif
+#endif
 	smblib_update_usb_type(chg);
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	chg->afc_sts = AFC_INIT;
+	vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+	vote(chg->fcc_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+#endif
+#endif
 
 	if (chg->wa_flags & BOOST_BACK_WA) {
 		data = chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data;
@@ -3527,6 +4905,11 @@ static void typec_src_removal(struct smb_charger *chg)
 	}
 
 	cancel_delayed_work_sync(&chg->pl_enable_work);
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	cancel_delayed_work_sync(&chg->compliant_check_work);
+#endif
+#endif
 
 	if (chg->wa_flags & CHG_TERMINATION_WA)
 		alarm_cancel(&chg->chg_termination_alarm);
@@ -3577,6 +4960,32 @@ static void typec_src_removal(struct smb_charger *chg)
 	if (rc < 0)
 		smblib_err(chg, "Couldn't set USBIN_ADAPTER_ALLOW_5V_OR_9V_TO_12V rc=%d\n",
 			rc);
+
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 start*/
+#ifdef CONFIG_ARCH_MSM8953
+	/*
+	 * if non-compliant charger caused UV, restore original max pulses
+	 * and turn SUSPEND_ON_COLLAPSE_USBIN_BIT back on.
+	 */
+	if (chg->qc2_unsupported_voltage) {
+		rc = smblib_masked_write(chg, HVDCP_PULSE_COUNT_MAX_REG,
+				HVDCP_PULSE_COUNT_MAX_QC2_MASK,
+				chg->qc2_max_pulses);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't restore max pulses rc=%d\n",
+					rc);
+
+		rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't turn on SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
+					rc);
+
+		chg->qc2_unsupported_voltage = QC2_COMPLIANT;
+	}
+#endif
+/*HS70 add for HS70-919 import Handle QC2.0 charger collapse patch by qianyingdong at 2019/11/18 end*/
 
 	if (chg->use_extcon)
 		smblib_notify_device_mode(chg, false);
@@ -3675,6 +5084,11 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 	struct smb_charger *chg = irq_data->parent_data;
 	u8 stat;
 	int rc;
+#if defined(CONFIG_TYPEC)
+	struct typec_partner_desc desc;
+	enum typec_pwr_opmode mode = TYPEC_PWR_MODE_USB;
+	union power_supply_propval val = {0};
+#endif
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
@@ -3696,9 +5110,39 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 		if (stat & SNK_SRC_MODE_BIT) {
 			chg->sink_src_mode = SRC_MODE;
 			typec_sink_insertion(chg);
+#if defined(CONFIG_TYPEC)
+			if (chg->port && (chg->partner == NULL)) {
+				chg->typec_power_role = TYPEC_SOURCE;
+				chg->typec_data_role = TYPEC_HOST;
+				chg->pwr_opmode = TYPEC_PWR_MODE_USB;
+				typec_set_pwr_opmode(chg->port, chg->pwr_opmode);
+				desc.usb_pd = mode == TYPEC_PWR_MODE_PD;
+				desc.accessory = TYPEC_ACCESSORY_NONE; /* XXX: handle accessories */
+				desc.identity = NULL;
+				typec_set_pwr_role(chg->port, chg->typec_power_role);
+				typec_set_data_role(chg->port, chg->typec_data_role);
+				pr_info("%s: typec_register_partner", __func__);
+				chg->partner = typec_register_partner(chg->port, &desc);
+			}
+#endif
 		} else {
 			chg->sink_src_mode = SINK_MODE;
 			typec_src_insertion(chg);
+#if defined(CONFIG_TYPEC)
+			if (chg->port && (chg->partner == NULL)) {
+				chg->typec_power_role = TYPEC_SINK;
+				chg->typec_data_role = TYPEC_DEVICE;
+				chg->pwr_opmode = TYPEC_PWR_MODE_USB;
+				typec_set_pwr_opmode(chg->port, chg->pwr_opmode);
+				desc.usb_pd = mode == TYPEC_PWR_MODE_PD;
+				desc.accessory = TYPEC_ACCESSORY_NONE; /* XXX: handle accessories */
+				desc.identity = NULL;
+				typec_set_pwr_role(chg->port, chg->typec_power_role);
+				typec_set_data_role(chg->port, chg->typec_data_role);
+				pr_info("%s: typec_register_partner", __func__);
+				chg->partner = typec_register_partner(chg->port, &desc);
+			}
+#endif
 		}
 
 	} else {
@@ -3718,6 +5162,32 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 			chg->sink_src_mode = UNATTACHED_MODE;
 			chg->early_usb_attach = false;
 		}
+#if defined(CONFIG_TYPEC)
+		if (chg->typec_try_state_change == TRY_ROLE_SWAP_TYPE) {
+			if (chg->requested_port_type == TYPEC_PORT_DFP)
+				val.intval = POWER_SUPPLY_TYPEC_PR_SOURCE;
+			else if (chg->requested_port_type == TYPEC_PORT_UFP)
+				val.intval = POWER_SUPPLY_TYPEC_PR_SINK;
+			else
+				val.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
+		} else {
+			val.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
+		}
+		pr_info("%s: typec_try_state_change = %d, requested_port_type = %d, val.intval = %d", __func__,
+			chg->typec_try_state_change, chg->requested_port_type, val.intval);
+		smblib_set_prop_typec_power_role(chg, &val);
+
+		chg->typec_try_state_change = TRY_ROLE_SWAP_NONE;
+
+		if (chg->partner) {
+			pr_info("%s: typec_unregister_partner", __func__);
+			if (!IS_ERR(chg->partner))
+				typec_unregister_partner(chg->partner);
+			chg->typec_power_role = TYPEC_SINK;
+			chg->typec_data_role = TYPEC_DEVICE;
+			chg->partner = NULL;
+		}
+#endif
 	}
 
 	power_supply_changed(chg->usb_psy);
@@ -3956,6 +5426,33 @@ int smblib_set_prop_pr_swap_in_progress(struct smb_charger *chg,
 /***************
  * Work Queues *
  ***************/
+#ifdef CONFIG_USB_NOTIFY_LAYER
+static void smblib_microb_otg_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger,
+						microb_otg_work.work);
+
+
+	struct otg_notify *o_notify = get_otg_notify();
+
+	if (!o_notify) {
+		smblib_dbg(chg, PR_MISC, "microb_otg_work again for otg_notify\n");
+
+		schedule_delayed_work(&chg->microb_otg_work,
+					msecs_to_jiffies(1000));
+		return;
+	}
+	smblib_dbg(chg, PR_MISC, "enable=%d\n", chg->otg_enable);
+
+	if (chg->otg_enable)
+		smblib_notify_extcon_props(chg, EXTCON_USB_HOST);
+
+	extcon_set_state_sync(chg->extcon, EXTCON_USB_HOST, chg->otg_enable);
+
+	send_otg_notify(o_notify, NOTIFY_EVENT_HOST, chg->otg_enable);
+}
+#endif
+
 static void smblib_uusb_otg_work(struct work_struct *work)
 {
 	struct smb_charger *chg = container_of(work, struct smb_charger,
@@ -3963,6 +5460,17 @@ static void smblib_uusb_otg_work(struct work_struct *work)
 	int rc;
 	u8 stat;
 	bool otg;
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	struct otg_notify *o_notify = get_otg_notify();
+
+	if (!o_notify) {
+		smblib_dbg(chg, PR_MISC, "uusb_otg_work again for otg_notify\n");
+
+		schedule_delayed_work(&chg->uusb_otg_work,
+					msecs_to_jiffies(500));
+		return;
+	}
+#endif
 
 	rc = smblib_read(chg, TYPEC_U_USB_STATUS_REG, &stat);
 	if (rc < 0) {
@@ -3970,6 +5478,10 @@ static void smblib_uusb_otg_work(struct work_struct *work)
 		goto out;
 	}
 	otg = !!(stat & U_USB_GROUND_NOVBUS_BIT);
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	smblib_dbg(chg, PR_MISC, "chg->otg_present=%d, otg=%d\n",
+		chg->otg_present, otg);
+#endif
 	if (chg->otg_present != otg)
 		smblib_notify_usb_host(chg, otg);
 	else
@@ -4248,8 +5760,15 @@ static enum alarmtimer_restart chg_termination_alarm_cb(struct alarm *alarm,
 
 #define JEITA_SOFT			0
 #define JEITA_HARD			1
+/* HS70 add for HS71-21 Optimize the stop and resume charging of battery temperature by gaochao at 2019/11/29 start */
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+int smblib_update_jeita(struct smb_charger *chg, u32 *thresholds,
+								int type)
+#else
 static int smblib_update_jeita(struct smb_charger *chg, u32 *thresholds,
 								int type)
+#endif
+/* HS70 add for HS71-21 Optimize the stop and resume charging of battery temperature by gaochao at 2019/11/29 end */
 {
 	int rc;
 	u16 temp, base;
@@ -4347,6 +5866,43 @@ static void jeita_update_work(struct work_struct *work)
 out:
 	chg->jeita_configured = true;
 }
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+static void smblib_compliant_check_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger,
+							compliant_check_work.work);
+	int rc;
+	u8 stat;
+
+	rc = smblib_read(chg, QC_CHANGE_STATUS_REG, &stat);
+	if (rc < 0) {
+		smblib_err(chg, "Couldn't read QC_CHANGE_STATUS_REG rc=%d\n",
+					rc);
+		return;
+	}
+
+	if (stat & QC_9V_BIT) {
+		 rc = smblib_read(chg, AICL_STATUS_REG, &stat);
+		 if (rc < 0) {
+			 smblib_err(chg, "Couldn't read AICL_STATUS rc=%d\n", rc);
+			 return;
+		 }
+		
+		 if( (stat & USBIN_CH_COLLAPSE) && (stat & ICL_IMIN) && (!chg->qc2_unsupported_voltage)) 
+		{
+			non_compliant_chg_WA(chg);
+			smblib_run_aicl(chg, RESTART_AICL);
+			smblib_hvdcp_set_fsw(chg, QC_5V_BIT);
+			rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT);
+			if (rc < 0)
+				pr_err("Failed to force 5V\n");
+		}
+	}
+}
+#endif
+#endif
 
 static int smblib_create_votables(struct smb_charger *chg)
 {
@@ -4454,9 +6010,32 @@ int smblib_init(struct smb_charger *chg)
 	INIT_DELAYED_WORK(&chg->clear_hdc_work, clear_hdc_work);
 	INIT_DELAYED_WORK(&chg->icl_change_work, smblib_icl_change_work);
 	INIT_DELAYED_WORK(&chg->pl_enable_work, smblib_pl_enable_work);
+#ifdef CONFIG_USB_NOTIFY_LAYER
+	INIT_DELAYED_WORK(&chg->microb_otg_work, smblib_microb_otg_work);
+#endif
 	INIT_DELAYED_WORK(&chg->uusb_otg_work, smblib_uusb_otg_work);
 	INIT_DELAYED_WORK(&chg->bb_removal_work, smblib_bb_removal_work);
 	INIT_DELAYED_WORK(&chg->usbov_dbc_work, smblib_usbov_dbc_work);
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+	INIT_DELAYED_WORK(&chg->compliant_check_work, smblib_compliant_check_work);
+#endif
+#endif
+	/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 start */
+	INIT_DELAYED_WORK(&chg->usb_thermal_status_change_work, ss_usb_thermal_status_change_work);
+	hq_usb_thermal_work_init_config(chg);
+	/* HS60 add for HS60-163 Set usb thermal by gaochao at 2019/07/30 end */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	INIT_DELAYED_WORK(&chg->retail_app_status_change_work, ss_retail_app_status_change_work);
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+	/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 start */
+	INIT_DELAYED_WORK(&chg->float_charger_detect_work, hq_float_charger_detect_work);
+	/* HS60 add for HS60-811 Set float charger by gaochao at 2019/08/27 end */
+	/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 start */
+	INIT_DELAYED_WORK(&chg->rerun_apsd_work, hq_rerun_apsd_work);
+	/* HS60 add for ZQL1693-8 rerun apsd to identify charger type by gaochao at 2019/09/04 end */
 
 	if (chg->wa_flags & CHG_TERMINATION_WA) {
 		INIT_WORK(&chg->chg_termination_work,
@@ -4485,6 +6064,26 @@ int smblib_init(struct smb_charger *chg)
 		}
 	}
 
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chg->slate_mode = 0;
+	#endif
+	/* HS60 add for SR-ZQL1695-01-358 Provide sysFS node named xxx/battery/batt_slate_mode by gaochao at 2019/08/29 end */
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chg->store_mode_ss = STORE_MODE_DISABLE_SS;
+	#endif
+	/* HS60 add for SR-ZQL1695-01-315 Provide sysFS node named /sys/class/power_supply/battery/store_mode for retail APP by gaochao at 2019/08/18 end */
+	/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chg->boot_to_detect_charger = BOOT_TO_DETECT_INIT;
+	#endif
+	/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
+	/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 start*/
+	#if !defined(HQ_FACTORY_BUILD)	//ss version
+	chg->slow_charging_count = 0;
+	#endif
+	/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 end*/
 	chg->fake_capacity = -EINVAL;
 	chg->fake_input_current_limited = -EINVAL;
 	chg->fake_batt_status = -EINVAL;
@@ -4561,9 +6160,30 @@ int smblib_deinit(struct smb_charger *chg)
 		cancel_delayed_work_sync(&chg->clear_hdc_work);
 		cancel_delayed_work_sync(&chg->icl_change_work);
 		cancel_delayed_work_sync(&chg->pl_enable_work);
+#ifdef CONFIG_USB_NOTIFY_LAYER
+		cancel_delayed_work_sync(&chg->microb_otg_work);
+#endif
 		cancel_delayed_work_sync(&chg->uusb_otg_work);
 		cancel_delayed_work_sync(&chg->bb_removal_work);
 		cancel_delayed_work_sync(&chg->usbov_dbc_work);
+		/* HS70 add for HS70-135 Distinguish HS60 and HS70 charging by gaochao at 2019/10/08 start */
+		cancel_delayed_work_sync(&chg->usb_thermal_status_change_work);
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		cancel_delayed_work_sync(&chg->retail_app_status_change_work);
+		#endif
+		cancel_delayed_work_sync(&chg->float_charger_detect_work);
+		cancel_delayed_work_sync(&chg->rerun_apsd_work);
+		/* HS70 add for HS70-135 Distinguish HS60 and HS70 charging by gaochao at 2019/10/08 end */
+		/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 start */
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		chg->boot_to_detect_charger = BOOT_TO_DETECT_INIT;
+		#endif
+		/* HS70 add for HS70-565 Set ICL of float charger as 500mA by gaochao at 2019/12/20 end */
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 start*/
+		#if !defined(HQ_FACTORY_BUILD)	//ss version
+		chg->slow_charging_count = 0;
+		#endif
+		/*HS60 add for P200213-04659 Slow Charging Optimize by wangzikang at 2020/02/14 end*/
 		power_supply_unreg_notifier(&chg->nb);
 		smblib_destroy_votables(chg);
 		qcom_step_chg_deinit();
@@ -4578,3 +6198,57 @@ int smblib_deinit(struct smb_charger *chg)
 
 	return 0;
 }
+
+#if !defined(HQ_FACTORY_BUILD)	//ss version
+#if defined(CONFIG_AFC)
+int is_afc_result(struct smb_charger *chg,int result)
+{
+	if (chg->real_charger_type != POWER_SUPPLY_TYPE_USB_DCP
+			&& chg->real_charger_type != POWER_SUPPLY_TYPE_AFC) {
+		smblib_err(chg, "cable is not DCP OR AFC %d\n", result);
+		vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+		return 0;
+	}
+	smblib_err(chg, "is_afc_result = %d, before afc_sts(%d)\n", result, chg->afc_sts);
+	chg->afc_sts = result;
+	
+	if ((result == NOT_AFC) || (result == AFC_FAIL))  {
+		if(chg->real_charger_type == POWER_SUPPLY_TYPE_AFC){
+			smblib_err(chg, "afc_set_voltage() failed\n");
+			vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+		}
+		else{
+			smblib_err(chg, "AFC failed, re-enabling HVDCP\n");
+			smblib_hvdcp_detect_enable(chg, true);
+			vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+		}
+	} else if (result == AFC_5V) {
+		smblib_err(chg, "afc set to 5V\n");
+		smblib_hvdcp_set_fsw(chg, QC_5V_BIT);
+		vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, true, DCP_CURRENT_UA);
+		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+	} else if (result == AFC_9V) {
+		smblib_err(chg, "afc set to 9V\n");
+		smblib_hvdcp_set_fsw(chg, QC_9V_BIT);
+//		vote(chg->usb_icl_votable, HVDCP2_ICL_VOTER, false, 0);
+		vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, true, AFC_CURRENT_UA);
+		vote(chg->fcc_votable, SEC_BATTERY_AFC_VOTER, true, 2700000);
+		vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+		/* HS50 add for SR-QL3095-01-67 Import default charger profile by wenyaqi at 2020/08/10 start */
+		chg->is_dcp = false;
+		pr_debug("is_dcp=%d\n", chg->is_dcp);
+		/* HS50 add for SR-QL3095-01-67 Import default charger profile by wenyaqi at 2020/08/10 end */
+	} else if (result == AFC_DISABLE) {
+		smblib_err(chg, "afc disable\n");
+		vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
+	}
+
+	if (result >= AFC_5V)
+		chg->real_charger_type = POWER_SUPPLY_TYPE_AFC;
+
+	sec_bat_monitor_work(chg);
+	
+	return 0;
+}
+#endif
+#endif

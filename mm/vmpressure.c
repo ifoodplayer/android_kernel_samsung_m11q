@@ -49,7 +49,7 @@ static unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
  * essence, they are percents: the higher the value, the more number
  * unsuccessful reclaims there were.
  */
-static const unsigned int vmpressure_level_med = 60;
+static const unsigned int vmpressure_level_med = CONFIG_VMPRESSURE_LEVEL_MED;
 static const unsigned int vmpressure_level_critical = 95;
 
 static unsigned long vmpressure_scale_max = 100;
@@ -244,6 +244,7 @@ static void vmpressure_work_fn(struct work_struct *work)
 
 	pressure = vmpressure_calc_pressure(scanned, reclaimed);
 	level = vmpressure_level(pressure);
+	vmpr->pressure = pressure;
 
 	do {
 		if (vmpressure_event(vmpr, level))

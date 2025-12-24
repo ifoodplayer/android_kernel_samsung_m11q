@@ -779,3 +779,33 @@ config SPECULATIVE_PAGE_FAULT
 	 detected or because underlying PMD or PTE tables are not yet
 	 allocating, it is failing its processing and a classic page fault
 	 is then tried.
+
+config INCREASE_MAXIMUM_SWAPPINESS
+	bool "Allow swappiness to be set up to 200"
+	depends on SWAP
+	default y
+
+config DIRECT_RECLAIM_FILE_PAGES_ONLY
+	bool "Reclaim file pages only on direct reclaim path"
+	depends on SWAP
+	default y
+
+config MMAP_READAROUND_LIMIT
+	int "Limit mmap readaround upperbound"
+	default 0
+	help
+	  Inappropriate mmap readaround size can hurt device performance
+	  during the sluggish situation. Add the hard upper-limit for
+	  mmap readaround.
+
+config FAULT_AROUND_4KB
+	bool "Fault around bytes 4KB"
+	default n
+	help
+	  Reduce fault around bytes to 4KB
+
+config VMPRESSURE_LEVEL_MED
+	int "Threshold to account memory pressure"
+	default 60
+	help
+	  This supports to adjust vmpressure_level_med threshold value

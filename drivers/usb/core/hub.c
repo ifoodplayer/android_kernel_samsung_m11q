@@ -33,6 +33,9 @@
 #include "hub.h"
 #include "otg_whitelist.h"
 
+#undef dev_dbg
+#define dev_dbg dev_err
+
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 
